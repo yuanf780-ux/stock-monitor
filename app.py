@@ -447,62 +447,146 @@ def page_watchlist():
 def page_detail():
     st.title("個股深度分析")
 
-    # Ticker input
-    col_t, col_p = st.columns([3, 1])
+    # ── 搜尋欄 ───────────────────────────────────────────────────────────
+    col_t, col_btn = st.columns([4, 1])
     with col_t:
-        ticker_input = st.text_input("股票代碼",
+        ticker_input = st.text_input("輸入股票代碼",
             value=st.session_state.get("detail_ticker", ""),
-            placeholder="2330.TW / NVDA / AAPL",
+            placeholder="台股輸入 2330.TW，美股輸入 NVDA",
             label_visibility="collapsed")
-    with col_p:
-        period_map = {"1月": "1mo", "3月": "3mo", "6月": "6mo", "1年": "1y"}
-        period = period_map[st.selectbox("區間", list(period_map.keys()), index=2,
-                                          label_visibility="collapsed")]
+    with col_btn:
+        do_search = st.button("查詢", use_container_width=True, type="primary")
 
     ticker = ticker_input.strip().upper()
+    if do_search and ticker:
+        st.session_state.detail_ticker = ticker
+        st.rerun()
+
     if not ticker:
-        st.info("請輸入股票代碼開始分析。"); return
+        st.info("在上方輸入股票代碼後按「查詢」，支援台股（2330.TW）和美股（NVDA、AAPL）")
+        st.markdown("**常見股票代碼範例：**")
+        examples = [
+            ("2330.TW","台積電"), ("2317.TW","鴻海"), ("2454.TW","聯發科"),
+            ("NVDA","輝達"), ("AAPL","蘋果"), ("TSLA","特斯拉"),
+        ]
+        ecols = st.columns(3)
+        for i, (t, n) in enumerate(examples):
+            with ecols[i % 3]:
+                if st.button(f"{n}  {t}", key=f"ex_{t}", use_container_width=True):
+                    st.session_state.detail_ticker = t
+                    st.rerun()
+        return
 
     st.session_state.detail_ticker = ticker
 
-    # ── Basic Info ────────────────────────────────────────────────────────
-    with st.spinner("載入資料…"):
-        info  = fetch_stock_info(ticker)
-        df_h  = fetch_history(ticker, period=period)
+    # ── 載入資料 ─────────────────────────────────────────────────────────
+    with st.spinner(f"載入 {ticker} 資料中…"):
+        info = fetch_stock_info(ticker)
+        df_h = fetch_history(ticker, period="6mo")
 
     if not info.get("valid") or df_h is None:
-        st.error(f"無法取得 {ticker} 資料。"); return
+        st.error(f"找不到 {ticker} 的資料，請確認代碼正確（台股要加 .TW，如 2330.TW）")
+        return
+
+    # 歷史資料選項（用 radio，不用下拉）
+    period_map = {"3 個月": "3mo", "6 個月": "6mo", "1 年": "1y", "2 年": "2y"}
+    period_label = st.radio("K 線顯示區間", list(period_map.keys()),
+                            index=1, horizontal=True)
+    period = period_map[period_label]
+    if period != "6mo":
+        df_h = fetch_history(ticker, period=period)
+
+    if not info.get("valid") or df_h is None:
+        st.error(f"找不到 {ticker} 的資料"); return
 
     df = compute_all(df_h)
     sigs = get_signals(df)
     mom  = _momentum_score(ticker)
     themes = sc.get_themes(ticker)
-
     name = info.get("name", ticker)
 
-    # ── Header Row ────────────────────────────────────────────────────────
-    pct    = info["change_pct"]
-    color  = "#22c55e" if pct >= 0 else "#ef4444"
-    arrow  = "▲" if pct >= 0 else "▼"
+    is_tw = ticker.endswith(".TW") or ticker.endswith(".TWO")
+    bg_card = "#0f1e3a" if is_tw else "#1c1200"
+    border  = "#3b82f6" if is_tw else "#f59e0b"
+
+    # ── 主要報價頭部 ──────────────────────────────────────────────────────
+    pct   = info["change_pct"]
+    color = "#4ade80" if pct >= 0 else "#f87171"
+    arrow = "▲" if pct >= 0 else "▼"
+    mkt_label = "台股" if is_tw else "美股"
+    mkt_color = "#3b82f6" if is_tw else "#f59e0b"
+
     st.markdown(f"""
-    <div style="background:#16213e;border-radius:12px;padding:16px 20px;margin-bottom:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
+    <div style="background:{bg_card};border-radius:12px;padding:16px 20px;
+                margin-bottom:10px;border-left:5px solid {border};">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
         <div>
-          <span style="font-size:0.8em;color:#9ca3af">{ticker}</span><br>
-          <span style="font-size:1.5em;font-weight:bold;color:#fff">{name}</span>
+          <span style="background:{mkt_color};color:#fff;border-radius:4px;
+                       padding:2px 8px;font-size:0.7em;font-weight:600">{mkt_label}</span>
+          <span style="color:#94a3b8;font-size:0.8em;margin-left:8px">{ticker}</span>
+          <div style="font-size:1.4em;font-weight:700;color:#f1f5f9;margin-top:4px">{name}</div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:2em;font-weight:bold;color:#fff">{info['price']:,.2f}</div>
-          <div style="font-size:1em;color:{color};font-weight:bold">{arrow} {info['change']:+.2f} ({pct:+.2f}%)</div>
+          <div style="font-size:2.2em;font-weight:800;color:#ffffff;line-height:1.1">{info['price']:,.2f}</div>
+          <div style="color:{color};font-weight:700;font-size:1.05em">
+            {arrow} {info['change']:+.2f} &nbsp; ({pct:+.2f}%)</div>
         </div>
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Themes
+    # ── 題材標籤 ─────────────────────────────────────────────────────────
     if themes:
-        theme_html = "".join(f'<span class="theme-badge">{t}</span>' for t in themes)
-        st.markdown(f'<div style="margin-bottom:8px">{theme_html}</div>', unsafe_allow_html=True)
+        t_html = "".join(f'<span class="theme-tag">{t}</span>' for t in themes)
+        st.markdown(f'<div style="margin-bottom:10px">{t_html}</div>', unsafe_allow_html=True)
+
+    # ── 今日關鍵數字（最重要的參考數據）─────────────────────────────────
+    last = df.iloc[-1]
+    prev = df.iloc[-2] if len(df) > 1 else last
+    hi52  = df["High"].max()
+    lo52  = df["Low"].min()
+    vol_avg20 = df["Volume"].tail(20).mean()
+    vol_today = last["Volume"]
+    vol_ratio = vol_today / vol_avg20 if vol_avg20 else 0
+
+    rsi_val = last.get("rsi")
+    rsi_color = "#f87171" if (rsi_val and rsi_val > 70) else "#4ade80" if (rsi_val and rsi_val < 30) else "#94a3b8"
+
+    # 趨勢強弱
+    mc = mom["color"]
+    ml = mom["label"]
+
+    m1, m2, m3, m4 = st.columns(4)
+    def _metric(col, label, value, note="", value_color="#ffffff"):
+        with col:
+            st.markdown(
+                f'<div style="background:#1e293b;border-radius:8px;padding:10px 12px;margin-bottom:8px;">'
+                f'<div style="font-size:0.72em;color:#64748b;font-weight:600">{label}</div>'
+                f'<div style="font-size:1.2em;font-weight:700;color:{value_color}">{value}</div>'
+                f'<div style="font-size:0.72em;color:#475569">{note}</div>'
+                f'</div>', unsafe_allow_html=True)
+
+    _metric(m1, "今日開盤", f"{last['Open']:,.2f}")
+    _metric(m2, "今日最高", f"{last['High']:,.2f}", f"區間最高 {hi52:,.2f}")
+    _metric(m3, "今日最低", f"{last['Low']:,.2f}", f"區間最低 {lo52:,.2f}")
+    _metric(m4, "今日成交量", f"{int(vol_today/1000):,}K",
+            f"均量比 {vol_ratio:.1f}x",
+            "#4ade80" if vol_ratio > 1.5 else "#94a3b8")
+
+    m5, m6, m7, m8 = st.columns(4)
+    _metric(m5, "RSI (14日)", f"{rsi_val:.1f}" if rsi_val else "—",
+            "超買>70 超賣<30", rsi_color)
+    _metric(m6, "MA20 均線",
+            f"{last['ma20']:,.2f}" if last.get('ma20') else "—",
+            f"{'站上' if last['Close'] > (last.get('ma20') or 0) else '跌破'} MA20",
+            "#4ade80" if last['Close'] > (last.get('ma20') or 0) else "#f87171")
+    _metric(m7, "趨勢強弱", ml,
+            "  ".join(mom["reasons"][:2]) if mom["reasons"] else "",
+            mc)
+    _metric(m8, "距52週高",
+            f"{(info['price']/hi52-1)*100:+.1f}%",
+            f"高點 {hi52:,.2f}",
+            "#f87171" if (info['price']/hi52 < 0.8) else "#4ade80")
 
     # ── Tabs within detail ────────────────────────────────────────────────
     dtab1, dtab2, dtab3, dtab4 = st.tabs(["📊 技術分析", "💰 籌碼法人", "🌳 供應鏈", "🤖 AI 分析"])
@@ -871,7 +955,7 @@ def page_institutional():
         "🟢 外資建倉排行", "🔴 外資減倉排行", "🔥 連買連賣排行", "📋 全部明細"
     ])
 
-    def _inst_bar(df_sub, col_key, title, color_pos, color_neg, top_n=30):
+    def _inst_bar(df_sub, col_key, title, color_pos, color_neg, uid, top_n=20):
         d = df_sub.head(top_n).copy()
         if d.empty:
             st.info("暫無資料"); return
@@ -884,37 +968,36 @@ def page_institutional():
             text=[f"{v:+.0f}K" for v in vals], textposition="outside",
         ))
         fig.update_layout(template="plotly_dark",
-            height=max(300, len(d)*26), title=title,
+            height=max(300, len(d)*28), title=title,
             margin=dict(l=10, r=80, t=40, b=20),
-            xaxis_title="千張",
+            xaxis_title="千張（千股）",
             yaxis=dict(autorange="reversed"))
         st.plotly_chart(fig, use_container_width=True)
 
-        # Table with drill-down
+        # 明細表
         show = d[["code","name","fi_cum","it_cum","total_cum","fi_consec"]].copy()
-        show.columns = ["代碼","名稱","外資累計","投信累計","三大法人","外資連續(日)"]
+        show.columns = ["代碼","名稱","外資累計","投信累計","三大法人","外資連買(日)"]
         for c in ["外資累計","投信累計","三大法人"]:
             show[c] = show[c].apply(lambda v: f"{'▲' if v>=0 else '▼'} {abs(v)//1000:.0f}K")
         st.dataframe(show.reset_index(drop=True), use_container_width=True, hide_index=True)
 
-        st.markdown("**點擊代碼查看個股深度分析：**")
-        sel_codes = st.multiselect("選擇股票", options=d["code"].tolist(),
-            format_func=lambda c: d.loc[d["code"]==c,"name"].values[0] + f" ({c})",
-            key=f"sel_{col_key}")
-        if sel_codes and st.button("🔬 進入個股分析", key=f"btn_{col_key}"):
-            goto_detail(sel_codes[0] + ".TW",
-                        d.loc[d["code"]==sel_codes[0],"name"].values[0])
+        # 跳轉分析 — uid 確保 key 唯一
+        sel = st.selectbox("選股查看分析", ["— 請選擇 —"] + labels, key=f"sel_{uid}")
+        if sel != "— 請選擇 —" and st.button("查看個股深度分析", key=f"btn_{uid}"):
+            code = sel.split("(")[-1].replace(")", "").strip()
+            name = sel.split("(")[0].strip()
+            goto_detail(code + ".TW", name)
             st.rerun()
 
     with tab_acc:
         st.markdown("#### 🟢 外資累計買超前 30 名（建倉 / 吸籌碼）")
         top_acc = inst.get_top_accumulation(cum_df, 30)
-        _inst_bar(top_acc, "fi_cum", "外資累計買超（千張）", "#22c55e", "#ef4444")
+        _inst_bar(top_acc, "fi_cum", "外資累計買超（千張）", "#22c55e", "#ef4444", "acc")
 
     with tab_dis:
         st.markdown("#### 🔴 外資累計賣超前 30 名（減倉 / 出貨）")
         top_dis = inst.get_top_distribution(cum_df, 30)
-        _inst_bar(top_dis.iloc[::-1].reset_index(drop=True), "fi_cum", "外資累計賣超（千張）", "#22c55e", "#ef4444")
+        _inst_bar(top_dis.iloc[::-1].reset_index(drop=True), "fi_cum", "外資累計賣超（千張）", "#22c55e", "#ef4444", "dis")
 
     with tab_consec:
         st.markdown("#### 🔥 連續買超 / 賣超排行（連續天數）")
