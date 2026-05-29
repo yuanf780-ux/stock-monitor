@@ -877,13 +877,17 @@ def page_institutional():
             st.info("暫無資料"); return
         vals = d[col_key] / 1000
         colors = [color_pos if v >= 0 else color_neg for v in vals]
+        labels = [f"{row['name']} ({row['code']})" for _, row in d.iterrows()]
         fig = go.Figure(go.Bar(
-            x=d["name"], y=vals, marker_color=colors, opacity=0.85,
+            y=labels, x=vals, orientation="h",
+            marker_color=colors, opacity=0.88,
             text=[f"{v:+.0f}K" for v in vals], textposition="outside",
         ))
-        fig.update_layout(template="plotly_dark", height=400, title=title,
-            margin=dict(l=10,r=10,t=40,b=60), xaxis_tickangle=-30,
-            yaxis_title="千張")
+        fig.update_layout(template="plotly_dark",
+            height=max(300, len(d)*26), title=title,
+            margin=dict(l=10, r=80, t=40, b=20),
+            xaxis_title="千張",
+            yaxis=dict(autorange="reversed"))
         st.plotly_chart(fig, use_container_width=True)
 
         # Table with drill-down
@@ -916,29 +920,34 @@ def page_institutional():
         st.markdown("#### 🔥 連續買超 / 賣超排行（連續天數）")
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("**連續買超最多天**")
-            buy_consec = cum_df[cum_df["fi_consec"] > 0].nlargest(20, "fi_consec")
+            st.markdown("**連續買超最多天（外資）**")
+            buy_consec = cum_df[cum_df["fi_consec"] > 0].nlargest(15, "fi_consec")
             if not buy_consec.empty:
                 fig_bc = go.Figure(go.Bar(
-                    x=buy_consec["name"], y=buy_consec["fi_consec"],
-                    marker_color="#22c55e", text=buy_consec["fi_consec"].astype(str)+"日",
+                    y=buy_consec["name"], x=buy_consec["fi_consec"],
+                    orientation="h", marker_color="#22c55e",
+                    text=buy_consec["fi_consec"].astype(str)+"日",
                     textposition="outside",
                 ))
-                fig_bc.update_layout(template="plotly_dark", height=350,
-                    margin=dict(l=10,r=10,t=10,b=60), xaxis_tickangle=-30, yaxis_title="天")
+                fig_bc.update_layout(template="plotly_dark",
+                    height=max(250, len(buy_consec)*24),
+                    margin=dict(l=10,r=60,t=10,b=20),
+                    xaxis_title="天", yaxis=dict(autorange="reversed"))
                 st.plotly_chart(fig_bc, use_container_width=True)
         with c2:
-            st.markdown("**連續賣超最多天**")
-            sell_consec = cum_df[cum_df["fi_consec"] < 0].nsmallest(20, "fi_consec")
+            st.markdown("**連續賣超最多天（外資）**")
+            sell_consec = cum_df[cum_df["fi_consec"] < 0].nsmallest(15, "fi_consec")
             if not sell_consec.empty:
                 fig_sc = go.Figure(go.Bar(
-                    x=sell_consec["name"], y=sell_consec["fi_consec"].abs(),
-                    marker_color="#ef4444",
+                    y=sell_consec["name"], x=sell_consec["fi_consec"].abs(),
+                    orientation="h", marker_color="#ef4444",
                     text=sell_consec["fi_consec"].abs().astype(int).astype(str)+"日",
                     textposition="outside",
                 ))
-                fig_sc.update_layout(template="plotly_dark", height=350,
-                    margin=dict(l=10,r=10,t=10,b=60), xaxis_tickangle=-30, yaxis_title="天")
+                fig_sc.update_layout(template="plotly_dark",
+                    height=max(250, len(sell_consec)*24),
+                    margin=dict(l=10,r=60,t=10,b=20),
+                    xaxis_title="天", yaxis=dict(autorange="reversed"))
                 st.plotly_chart(fig_sc, use_container_width=True)
 
     with tab_all:
@@ -989,13 +998,19 @@ def page_sector():
 
         perf_df = st.session_state.get("sector_perf_df", pd.DataFrame())
         if not perf_df.empty:
-            colors = ["#22c55e" if v >= 0 else "#ef4444" for v in perf_df["ret_1w"]]
-            fig_hm = go.Figure(go.Bar(x=perf_df["sector"], y=perf_df["ret_1w"],
-                marker_color=colors, text=[f"{v:+.1f}%" for v in perf_df["ret_1w"]],
-                textposition="outside"))
-            fig_hm.update_layout(template="plotly_dark", height=380,
-                title="各族群近 1 週漲跌幅",
-                margin=dict(l=10,r=10,t=40,b=80), xaxis_tickangle=-35, yaxis_title="%")
+            perf_sorted = perf_df.sort_values("ret_1w")
+            colors = ["#22c55e" if v >= 0 else "#ef4444" for v in perf_sorted["ret_1w"]]
+            fig_hm = go.Figure(go.Bar(
+                y=perf_sorted["sector"], x=perf_sorted["ret_1w"],
+                orientation="h", marker_color=colors,
+                text=[f"{v:+.1f}%" for v in perf_sorted["ret_1w"]],
+                textposition="outside",
+            ))
+            fig_hm.update_layout(template="plotly_dark",
+                height=max(400, len(perf_sorted)*22),
+                title="各族群近 1 週漲跌幅排行",
+                margin=dict(l=10, r=70, t=40, b=20),
+                xaxis_title="漲跌幅 (%)")
             st.plotly_chart(fig_hm, use_container_width=True)
 
             display = perf_df.copy()
@@ -1021,12 +1036,18 @@ def page_sector():
             with st.spinner("取得族群績效…"):
                 perf = sd.fetch_sector_performance(sector_stocks, top_n=15)
             if not perf.empty:
-                colors_s = ["#22c55e" if (v is not None and v>=0) else "#ef4444" for v in perf["ret_1w"]]
-                fig_s = go.Figure(go.Bar(x=perf["name"], y=perf["ret_1w"],
-                    marker_color=colors_s, text=[f"{v:+.1f}%" if v else "" for v in perf["ret_1w"]],
-                    textposition="outside"))
-                fig_s.update_layout(template="plotly_dark", height=300,
-                    margin=dict(l=10,r=10,t=10,b=60), xaxis_tickangle=-30, yaxis_title="近1週%")
+                perf_s = perf.sort_values("ret_1w")
+                colors_s = ["#22c55e" if (v is not None and v>=0) else "#ef4444" for v in perf_s["ret_1w"]]
+                fig_s = go.Figure(go.Bar(
+                    y=perf_s["name"], x=perf_s["ret_1w"],
+                    orientation="h", marker_color=colors_s,
+                    text=[f"{v:+.1f}%" if v else "" for v in perf_s["ret_1w"]],
+                    textposition="outside",
+                ))
+                fig_s.update_layout(template="plotly_dark",
+                    height=max(280, len(perf_s)*26),
+                    margin=dict(l=10, r=60, t=10, b=20),
+                    xaxis_title="近1週漲跌%")
                 st.plotly_chart(fig_s, use_container_width=True)
 
                 add_sel = st.multiselect("加入自選股", options=perf["ticker"].tolist(),
