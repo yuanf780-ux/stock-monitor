@@ -224,6 +224,45 @@ def get_api_key():
     return key
 
 
+def zh_news_analysis(news_item: Dict, impact: Dict) -> str:
+    """
+    用 Claude Haiku 即時將新聞標題翻成中文並簡析台股影響。
+    無 API Key 時使用模板回傳。
+    """
+    theme    = impact.get("theme", "")
+    tw_names = "、".join(n for _, n in impact.get("tw_stocks", [])[:3])
+
+    api_key = get_api_key()
+    if not api_key:
+        # 無 API Key → 模板回傳
+        if impact.get("matched"):
+            return f"【{theme}】相關消息，台股 {tw_names} 明日值得留意。"
+        return ""
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        prompt = (
+            f"請用繁體中文，以2句話簡析以下英文財經新聞對台股的影響：\n\n"
+            f"新聞：{news_item['title']}\n"
+            f"涉及題材：{theme or '一般財經'}\n"
+            f"相關台股：{tw_names or '待確認'}\n\n"
+            f"第1句：用台灣投資人角度說明新聞核心（必須包含中文翻譯要點）\n"
+            f"第2句：台股哪些股票或族群受到影響（多/空/中性）\n\n"
+            f"直接給分析，語氣像操盤手，不要說「根據」或「請注意」。"
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=120,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
+    except Exception:
+        if impact.get("matched"):
+            return f"【{theme}】消息，{tw_names} 明日值得留意。"
+        return ""
+
+
 def ai_news_briefing(news_list: List[Dict], us_movers: List[Dict],
                      cycle_phase: str) -> str:
     """

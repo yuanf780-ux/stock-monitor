@@ -1722,60 +1722,78 @@ def page_cycle():
 
     st.divider()
 
-    # ── 明日台股可能強勢標的 ─────────────────────────────────────
-    st.markdown("#### 美股今日訊號 → 明日台股可能強勢標的")
-    st.caption("依美股漲跌幅排序，超過 ±1.5% 才列入")
+    # ════ 明日台股關注排行（整合所有美股信號，加權計算）══════════════════
+    st.markdown("#### 明日台股關注排行")
+    st.caption("整合今日所有美股漲跌 → 依關聯強度排名，被多個美股信號指向的台股排名更高")
 
-    morning = cyc.morning_signal(us_prices)
-    if not morning:
-        st.info("目前美股尚未有顯著漲跌信號（>±1.5%）")
+    watchlist_tw = cyc.tomorrow_tw_watchlist(us_prices, max_stocks=12)
+
+    if not watchlist_tw:
+        st.info("目前美股無顯著信號（漲跌 < 1%），明日無特定強勢標的")
     else:
-        for sig in morning:
-            pct    = sig["pct"]
-            color  = "#22c55e" if pct > 0 else "#ef4444"
-            arrow  = "▲" if pct > 0 else "▼"
-            tw_list = sig["tw_stocks"]
+        # 批次取台股即時報價
+        wl_tickers = tuple(c["ticker"] for c in watchlist_tw
+                           if c["ticker"].endswith(".TW"))
+        with st.spinner("載入台股報價…"):
+            wl_prices = _batch_prices(wl_tickers)
 
-            st.markdown(
-                f'<div style="background:#1e293b;border-radius:10px;padding:12px 16px;'
-                f'margin-bottom:8px;border-left:4px solid {color};">'
-                f'<div style="display:flex;justify-content:space-between;align-items:center;">'
-                f'<div>'
-                f'  <span style="color:#94a3b8;font-size:0.8em">美股 {sig["sym"]}</span>'
-                f'  <span style="background:#1e3a5f;color:#93c5fd;border-radius:3px;'
-                f'    padding:1px 7px;font-size:0.75em;margin-left:6px">{sig["theme"].split("/")[0][:12]}</span>'
-                f'</div>'
-                f'<div style="color:{color};font-weight:700;font-size:1.1em">'
-                f'{arrow} {abs(pct):.2f}%</div>'
-                f'</div>'
-                f'<div style="font-weight:600;color:#f1f5f9;margin-top:4px">{sig["name"]}</div>'
-                f'<div style="color:#64748b;font-size:0.78em;margin-top:2px">'
-                f'{sig["direction"]}→ {sig["reason"][:50]}{"..." if len(sig["reason"])>50 else ""}'
-                f'</div></div>',
-                unsafe_allow_html=True,
+        for rank, cand in enumerate(watchlist_tw, 1):
+            tk     = cand["ticker"]
+            name   = cand["name"]
+            direct = cand["direction"]
+            score  = cand["score"]
+            sigs   = cand["signals"]
+            themes = cand["themes"]
+            p      = wl_prices.get(tk, {})
+
+            dir_color = "#22c55e" if direct == "多" else "#ef4444"
+            dir_arrow = "▲" if direct == "多" else "▼"
+            price_str = f'{p["price"]:,.2f}  {("▲" if p["pct"]>=0 else "▼")}{p["pct"]:+.1f}%' if p else "—"
+            theme_tags = "".join(
+                f'<span style="background:#1e3a5f;color:#93c5fd;border-radius:3px;'
+                f'padding:1px 6px;font-size:0.7em;margin-right:3px">{t}</span>'
+                for t in themes[:2]
+            )
+            # 信號來源摘要
+            sig_summary = "  ".join(
+                f'{s["us_name"]}({s["us_sym"]}) {s["us_pct"]:+.1f}%'
+                for s in sorted(sigs, key=lambda x: abs(x["us_pct"]), reverse=True)[:3]
             )
 
-            # 台股明日可能標的
-            if tw_list:
-                tw_prices_local = _batch_prices(tuple(
-                    t for t, _, _ in tw_list
-                    if not any(k in t for k in ["廠","牌"])
-                ))
-                tw_cols = st.columns(min(len(tw_list), 3))
-                for i, (t, n, note) in enumerate(tw_list[:6]):
-                    p = tw_prices_local.get(t, {})
-                    pstr = f'{p["price"]:,.2f}  {("▲" if p["pct"]>=0 else "▼")}{p["pct"]:+.1f}%' if p else "—"
-                    with tw_cols[i % len(tw_cols)]:
-                        st.markdown(
-                            f'<div style="background:#0f172a;border-left:3px solid {color};'
-                            f'border-radius:6px;padding:7px 10px;margin-bottom:4px;">'
-                            f'<div style="font-size:0.72em;color:#475569">{t}</div>'
-                            f'<div style="font-weight:600;color:#e2e8f0;font-size:0.9em">{n}</div>'
-                            f'<div style="color:#94a3b8;font-size:0.8em">{pstr}</div>'
-                            f'<div style="color:#475569;font-size:0.68em">{note[:20]}</div>'
-                            f'</div>', unsafe_allow_html=True)
-                        if st.button("分析", key=f"cy_{t}_{i}", use_container_width=True):
-                            goto_detail(t, n); st.rerun()
+            col_r, col_main, col_btn = st.columns([0.4, 5, 1.2])
+            with col_r:
+                # 排名徽章
+                badge_bg = "#1e3a5f" if rank <= 3 else "#1e293b"
+                badge_c  = "#fbbf24" if rank <= 3 else "#64748b"
+                st.markdown(
+                    f'<div style="background:{badge_bg};border-radius:8px;text-align:center;'
+                    f'padding:14px 6px;font-size:1.3em;font-weight:800;color:{badge_c}">'
+                    f'#{rank}</div>', unsafe_allow_html=True)
+            with col_main:
+                st.markdown(
+                    f'<div style="background:#1e293b;border-radius:10px;padding:10px 14px;'
+                    f'border-left:4px solid {dir_color};">'
+                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+                    f'<div>'
+                    f'  <span style="color:#94a3b8;font-size:0.72em">{tk}</span>'
+                    f'  {theme_tags}'
+                    f'  <div style="font-size:1em;font-weight:700;color:#f1f5f9">{name}</div>'
+                    f'</div>'
+                    f'<div style="text-align:right">'
+                    f'  <div style="font-size:1.1em;font-weight:700;color:#fff">{price_str}</div>'
+                    f'  <div style="color:{dir_color};font-size:0.85em;font-weight:600">'
+                    f'    {dir_arrow} 關聯分數 {score:.1f}</div>'
+                    f'</div></div>'
+                    f'<div style="margin-top:6px;color:#64748b;font-size:0.75em">'
+                    f'  信號來源：{sig_summary}</div>'
+                    f'</div>', unsafe_allow_html=True)
+            with col_btn:
+                if st.button("深度分析", key=f"wl_cy_{tk}", use_container_width=True):
+                    goto_detail(tk, name); st.rerun()
+
+    # ── 即時新聞 + 中文解析 + 產業影響 ──────────────────────────────────
+    st.divider()
+    st.subheader("即時財經新聞  ×  中文解析  ×  產業影響")
 
     # ── 即時新聞 + 產業影響分析 ──────────────────────────────────────
     st.divider()
@@ -1801,47 +1819,71 @@ def page_cycle():
     if not news_list:
         st.warning("新聞暫時無法載入，請稍後再試。")
     else:
-        for news_item in news_list:
-            impact = nf.tag_news_impact(news_item["title"])
-            color  = impact.get("color", "#475569")
-            theme  = impact.get("theme", "")
+        # 是否有 API Key（決定是否顯示「AI 解析」按鈕）
+        has_api = bool(nf.get_api_key())
+        if has_api:
+            st.caption("點「AI 解析」讓 Claude 用中文分析每則新聞的台股影響（需 ANTHROPIC_API_KEY）")
+        else:
+            st.caption("設定 ANTHROPIC_API_KEY 可啟用每則新聞 AI 中文解析功能")
+
+        for idx, news_item in enumerate(news_list):
+            impact  = nf.tag_news_impact(news_item["title"])
+            color   = impact.get("color", "#475569")
+            theme   = impact.get("theme", "")
             tw_list = impact.get("tw_stocks", [])
+            border  = color if theme else "#374151"
 
-            # 新聞卡片
-            theme_badge = (f'<span style="background:{color}22;color:{color};border-radius:4px;'
-                           f'padding:2px 8px;font-size:0.72em;font-weight:600;margin-left:6px">'
-                           f'{theme}</span>') if theme else ""
-
-            st.markdown(
-                f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
-                f'margin-bottom:6px;border-left:3px solid {color if theme else "#374151"};">'
-                # 時間 + 來源 + 主題標籤
-                f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
-                f'  <span style="color:#64748b;font-size:0.72em">{news_item["time"]}</span>'
-                f'  <span style="color:#475569;font-size:0.72em">{news_item["publisher"][:20]}</span>'
-                f'  {theme_badge}'
-                f'</div>'
-                # 新聞標題
-                f'<div style="color:#e2e8f0;font-size:0.88em;font-weight:500;margin-bottom:6px">'
-                f'  <a href="{news_item["url"]}" target="_blank" style="color:#e2e8f0;text-decoration:none">'
-                f'  {news_item["title"]}</a>'
-                f'</div>'
-                + (
-                    # 台股影響標的
-                    f'<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">'
-                    f'  <span style="color:#64748b;font-size:0.72em;align-self:center">台股影響：</span>'
+            tw_chips = ""
+            if tw_list:
+                tw_chips = (
+                    f'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:5px">'
+                    f'<span style="color:#64748b;font-size:0.7em;align-self:center">台股影響 →</span>'
                     + "".join(
-                        f'<span style="background:#0f172a;border:1px solid {color}44;'
-                        f'color:#e2e8f0;border-radius:4px;padding:2px 8px;font-size:0.72em">'
-                        f'{n}</span>'
+                        f'<span style="background:#0f172a;border:1px solid {color}55;'
+                        f'color:#e2e8f0;border-radius:4px;padding:2px 8px;font-size:0.7em">{n}</span>'
                         for _, n in tw_list[:4]
                     )
-                    + f'</div>'
-                    if tw_list else ""
+                    + '</div>'
                 )
-                + f'</div>',
-                unsafe_allow_html=True,
-            )
+            theme_badge = (
+                f'<span style="background:{color}22;color:{color};border-radius:4px;'
+                f'padding:1px 8px;font-size:0.7em;font-weight:600">{theme}</span>'
+            ) if theme else ""
+
+            # 取出 session 中已存的 AI 解析
+            cache_key = f"news_zh_{idx}"
+            saved_zh  = st.session_state.get(cache_key, "")
+
+            col_news, col_ai = st.columns([6, 1])
+            with col_news:
+                st.markdown(
+                    f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
+                    f'border-left:3px solid {border};">'
+                    f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+                    f'  <span style="color:#64748b;font-size:0.7em">{news_item["time"]}</span>'
+                    f'  <span style="color:#475569;font-size:0.7em">{news_item["publisher"][:18]}</span>'
+                    f'  {theme_badge}'
+                    f'</div>'
+                    f'<div style="color:#e2e8f0;font-size:0.88em;font-weight:500">'
+                    f'  <a href="{news_item["url"]}" target="_blank" '
+                    f'     style="color:#e2e8f0;text-decoration:none">{news_item["title"]}</a>'
+                    f'</div>'
+                    f'{tw_chips}'
+                    + (
+                        f'<div style="margin-top:6px;padding:6px 10px;background:#0f172a;'
+                        f'border-radius:5px;color:#a5b4fc;font-size:0.82em;line-height:1.5">'
+                        f'{saved_zh}</div>'
+                        if saved_zh else ""
+                    )
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_ai:
+                if has_api and st.button("AI 解析", key=f"news_ai_{idx}", use_container_width=True):
+                    with st.spinner("Claude 分析中…"):
+                        zh = nf.zh_news_analysis(news_item, impact)
+                    st.session_state[cache_key] = zh
+                    st.rerun()
 
     st.caption("⚠️ 景氣循環判斷為輔助參考，不構成投資建議。")
 

@@ -232,3 +232,77 @@ def morning_signal(us_prices: dict) -> list:
         })
     signals.sort(key=lambda x: x["strength"], reverse=True)
     return signals[:10]
+
+
+def tomorrow_tw_watchlist(us_prices: dict, max_stocks: int = 15) -> list:
+    """
+    整合所有美股漲跌信號，計算每支台股被多少美股「指向」，
+    加權後給出「明日台股關注排行」。
+
+    回傳 list of {
+        ticker, name, note,
+        signals:  [{ us_sym, us_name, us_pct, theme, impact_type }],
+        signal_count, max_pct, score, direction
+    }
+    score = Σ abs(us_pct) × weight(impact_type)
+    """
+    from us_tw_impact import US_TW_IMPACT
+
+    IMPACT_WEIGHT = {
+        "供應鏈帶動": 1.5,
+        "同業連動":   1.2,
+        "需求端驅動": 1.3,
+        "同步連動":   1.4,
+        "競爭/反向":  0.8,
+        "競爭/同業":  1.0,
+    }
+    _skip = {"廠","牌","消費者","企業","貨主","開發者","PANASONIC","ALB","NIO"}
+
+    candidates: dict = {}
+
+    for sym, p in us_prices.items():
+        pct = p.get("pct", 0)
+        if abs(pct) < 1.0:   # 低於 1% 不計入
+            continue
+        impact = US_TW_IMPACT.get(sym, {})
+        if not impact:
+            continue
+        itype  = impact.get("impact_type", "同業連動")
+        weight = IMPACT_WEIGHT.get(itype, 1.0)
+        theme  = impact.get("theme", "")
+
+        for ticker, name, note in impact.get("tw_stocks", []):
+            if not ticker or any(k in ticker for k in _skip):
+                continue
+            if ticker not in candidates:
+                candidates[ticker] = {
+                    "ticker": ticker,
+                    "name":   name,
+                    "note":   note,
+                    "signals":       [],
+                    "score":         0.0,
+                    "max_pct":       0.0,
+                    "signal_count":  0,
+                    "direction":     "多" if pct > 0 else "空",
+                    "themes":        set(),
+                }
+            c = candidates[ticker]
+            c["signals"].append({
+                "us_sym":      sym,
+                "us_name":     impact.get("name", sym),
+                "us_pct":      pct,
+                "theme":       theme,
+                "impact_type": itype,
+            })
+            c["score"]        += abs(pct) * weight
+            c["signal_count"] += 1
+            c["themes"].add(theme.split("/")[0][:10])
+            if abs(pct) > abs(c["max_pct"]):
+                c["max_pct"]  = pct
+                c["direction"] = "多" if pct > 0 else "空"
+
+    for c in candidates.values():
+        c["themes"] = list(c["themes"])
+
+    ranked = sorted(candidates.values(), key=lambda x: x["score"], reverse=True)
+    return ranked[:max_stocks]
