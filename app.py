@@ -471,41 +471,41 @@ def page_market():
                     + '</div>'
                 )
 
-            col_n, col_btn = st.columns([8, 1])
-            with col_n:
-                st.markdown(
-                    f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
-                    f'border-left:3px solid {color};">'
-                    f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
-                    f'<span style="color:#64748b;font-size:0.7em">{item["time"]}</span>'
-                    f'<span style="color:#475569;font-size:0.7em">{item["publisher"][:18]}</span>'
-                    f'{theme_badge}</div>'
-                    f'<div style="color:#e2e8f0;font-size:0.88em;font-weight:500">'
-                    f'<a href="{item["url"]}" target="_blank" style="color:#e2e8f0;text-decoration:none">'
-                    f'{item["title"]}</a></div>'
-                    f'{tw_chips}'
-                    + (
-                        f'<div style="margin-top:6px;padding:7px 10px;background:#0f172a;'
-                        f'border-radius:5px;color:#a5b4fc;font-size:0.82em;line-height:1.5">'
-                        f'{saved_zh}</div>'
-                        if saved_zh else ""
-                    )
-                    + '</div>',
-                    unsafe_allow_html=True,
+            # 新聞卡片（全寬）
+            st.markdown(
+                f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
+                f'border-left:3px solid {color};margin-bottom:2px">'
+                f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+                f'<span style="color:#64748b;font-size:0.7em">{item["time"]}</span>'
+                f'<span style="color:#475569;font-size:0.7em">{item["publisher"][:18]}</span>'
+                f'{theme_badge}</div>'
+                f'<div style="color:#e2e8f0;font-size:0.88em;font-weight:500">'
+                f'<a href="{item["url"]}" target="_blank" style="color:#e2e8f0;text-decoration:none">'
+                f'{item["title"]}</a></div>'
+                f'{tw_chips}'
+                + (
+                    f'<div style="margin-top:8px;padding:8px 12px;background:#0f172a;'
+                    f'border-radius:6px;line-height:1.7;font-size:0.85em;white-space:pre-wrap;'
+                    f'color:#c7d2fe">{saved_zh}</div>'
+                    if saved_zh else ""
                 )
-            with col_btn:
-                if st.button("中文解析", key=f"mkt_ai_{idx}", use_container_width=True):
+                + '</div>',
+                unsafe_allow_html=True,
+            )
+            # 按鈕放在卡片下方全寬，容易點
+            if not saved_zh:
+                if st.button(f"AI 中文解析 + 股票多空判斷",
+                             key=f"mkt_ai_{idx}", use_container_width=True):
                     if not has_api:
                         st.session_state[cache_key] = (
-                            "⚠️ 需要設定 ANTHROPIC_API_KEY 才能使用 AI 解析。\n"
-                            "請到 Streamlit Cloud → Manage app → Secrets，加入：\n"
-                            "ANTHROPIC_API_KEY = \"sk-ant-xxxxx\""
+                            "⚠️ 請先設定 ANTHROPIC_API_KEY\n"
+                            "Manage app → Settings → Secrets → 加入：\n"
+                            "ANTHROPIC_API_KEY = \"sk-ant-...\""
                         )
                     else:
-                        with st.spinner("Claude 分析中…"):
+                        with st.spinner(f"Claude 分析中（約 5 秒）…"):
                             zh = nf.zh_news_analysis(item, impact)
                         st.session_state[cache_key] = zh
-                    st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1989,27 +1989,24 @@ def page_cycle():
                     f'</div>'
                     f'{tw_chips}'
                     + (
-                        f'<div style="margin-top:6px;padding:6px 10px;background:#0f172a;'
-                        f'border-radius:5px;color:#a5b4fc;font-size:0.82em;line-height:1.5">'
+                        f'<div style="margin-top:8px;padding:8px 12px;background:#0f172a;'
+                        f'border-radius:6px;color:#c7d2fe;font-size:0.85em;'
+                        f'line-height:1.7;white-space:pre-wrap">'
                         f'{saved_zh}</div>'
                         if saved_zh else ""
                     )
                     + '</div>',
                     unsafe_allow_html=True,
                 )
-            with col_ai:
-                if st.button("中文解析", key=f"news_ai_{idx}", use_container_width=True):
-                    if not has_api:
-                        st.session_state[cache_key] = (
-                            "⚠️ 需設定 ANTHROPIC_API_KEY\n"
-                            "Manage app → Secrets →\n"
-                            "ANTHROPIC_API_KEY = \"sk-ant-...\""
-                        )
-                    else:
-                        with st.spinner("分析中…"):
-                            zh = nf.zh_news_analysis(news_item, impact)
-                        st.session_state[cache_key] = zh
-                    st.rerun()
+            if not saved_zh:
+                with col_ai:
+                    if st.button("AI 解析", key=f"news_ai_{idx}", use_container_width=True):
+                        if not has_api:
+                            st.session_state[cache_key] = "⚠️ 需設定 ANTHROPIC_API_KEY"
+                        else:
+                            with st.spinner("分析中…"):
+                                zh = nf.zh_news_analysis(news_item, impact)
+                            st.session_state[cache_key] = zh
 
     st.caption("⚠️ 景氣循環判斷為輔助參考，不構成投資建議。")
 
