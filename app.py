@@ -476,50 +476,59 @@ def page_market():
 
             auto_zh = auto_summaries.get(idx, "")
 
-            # 新聞卡片（全寬）
-            st.markdown(
-                f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
-                f'border-left:3px solid {color};margin-bottom:2px">'
-                f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
-                f'<span style="color:#64748b;font-size:0.7em">🇹🇼 {item["time"]}</span>'
-                f'&nbsp;·&nbsp;'
-                f'<span style="color:#475569;font-size:0.7em">🇺🇸 {item.get("time_us","")}</span>'
-                f'&nbsp;&nbsp;'
-                f'<span style="color:#475569;font-size:0.7em">{item["publisher"][:18]}</span>'
-                f'{theme_badge}</div>'
-                # 英文原標題
-                f'<div style="color:#94a3b8;font-size:0.78em">'
-                f'<a href="{item["url"]}" target="_blank" style="color:#94a3b8;text-decoration:none">'
-                f'{item["title"][:80]}{"…" if len(item["title"])>80 else ""}</a></div>'
-                # 中文摘要（多行：重點/趨勢/多空，自動換行顯示）
-                + (
-                    f'<div style="margin-top:7px;padding:8px 12px;background:#0f172a;'
-                    f'border-radius:6px;font-size:0.88em;line-height:1.8;'
-                    f'white-space:pre-line;color:#e2e8f0">{auto_zh}</div>'
-                    if auto_zh else ""
+            # ── 新聞卡片：乾淨單層 ───────────────────────────────────────
+            # 有詳細分析時：只顯示分析（取代自動中文標題）
+            # 沒有詳細分析：顯示自動中文標題 + 按鈕
+
+            if saved_zh:
+                # 已按過按鈕 → 顯示完整分析
+                st.markdown(
+                    f'<div style="background:#1e293b;border-radius:8px;padding:12px 14px;'
+                    f'border-left:3px solid {color};margin-bottom:4px;">'
+                    f'<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'
+                    f'<span style="color:#64748b;font-size:0.7em">🇹🇼 {item["time"]}'
+                    f'&nbsp;·&nbsp;🇺🇸 {item.get("time_us","")}</span>'
+                    f'&nbsp;&nbsp;<span style="color:#475569;font-size:0.7em">{item["publisher"][:16]}</span>'
+                    f'{theme_badge}</div>'
+                    f'<div style="color:#94a3b8;font-size:0.75em;margin-bottom:8px">'
+                    f'<a href="{item["url"]}" target="_blank" style="color:#94a3b8;text-decoration:none">'
+                    f'{item["title"][:70]}{"…" if len(item["title"])>70 else ""}</a></div>'
+                    # 完整分析內容
+                    f'<div style="padding:10px 12px;background:#0f172a;border-radius:6px;'
+                    f'font-size:0.87em;line-height:1.9;white-space:pre-wrap;color:#e2e8f0">'
+                    f'{saved_zh}</div>'
+                    f'{tw_chips}'
+                    f'</div>',
+                    unsafe_allow_html=True,
                 )
-                + f'{tw_chips}'
-                + (
-                    f'<div style="margin-top:8px;padding:8px 12px;background:#0f172a;'
-                    f'border-radius:6px;line-height:1.7;font-size:0.85em;white-space:pre-wrap;'
-                    f'color:#c7d2fe">{saved_zh}</div>'
-                    if saved_zh else ""
+            else:
+                # 還沒分析 → 顯示自動中文標題 + 按鈕
+                st.markdown(
+                    f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
+                    f'border-left:3px solid {color};margin-bottom:2px;">'
+                    f'<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">'
+                    f'<span style="color:#64748b;font-size:0.7em">🇹🇼 {item["time"]}'
+                    f'&nbsp;·&nbsp;🇺🇸 {item.get("time_us","")}</span>'
+                    f'&nbsp;&nbsp;<span style="color:#475569;font-size:0.7em">{item["publisher"][:16]}</span>'
+                    f'{theme_badge}</div>'
+                    # 中文標題（主要閱讀）
+                    + (f'<div style="color:#f1f5f9;font-size:0.92em;font-weight:600;'
+                       f'margin-bottom:3px">{auto_zh}</div>' if auto_zh else "")
+                    # 英文原標題（小字備查）
+                    + f'<div style="color:#475569;font-size:0.72em">'
+                    f'<a href="{item["url"]}" target="_blank" style="color:#475569;text-decoration:none">'
+                    f'{item["title"][:75]}{"…" if len(item["title"])>75 else ""}</a></div>'
+                    + f'{tw_chips}'
+                    + f'</div>',
+                    unsafe_allow_html=True,
                 )
-                + '</div>',
-                unsafe_allow_html=True,
-            )
-            # 按鈕放在卡片下方全寬，容易點
-            if not saved_zh:
-                if st.button(f"AI 中文解析 + 股票多空判斷",
+                # 分析按鈕
+                if st.button("詳細分析（多空 + 題材）",
                              key=f"mkt_ai_{idx}", use_container_width=True):
                     if not has_api:
-                        st.session_state[cache_key] = (
-                            "⚠️ 請先設定 ANTHROPIC_API_KEY\n"
-                            "Manage app → Settings → Secrets → 加入：\n"
-                            "ANTHROPIC_API_KEY = \"sk-ant-...\""
-                        )
+                        st.session_state[cache_key] = "⚠️ 請先設定 ANTHROPIC_API_KEY（Manage app → Settings → Secrets）"
                     else:
-                        with st.spinner(f"Claude 分析中（約 5 秒）…"):
+                        with st.spinner("Claude 分析中…"):
                             zh = nf.zh_news_analysis(item, impact)
                         st.session_state[cache_key] = zh
 

@@ -243,17 +243,13 @@ def get_api_key():
 
 def zh_news_analysis(news_item: Dict, impact: Dict) -> str:
     """
-    用 Claude Haiku 即時分析新聞並給出股票多空建議。
-    格式：中文摘要 + 看多 + 看空 + 理由
-    重要：只能使用提供的股票清單，不自行編造代碼。
+    點「中文解析」後的完整分析：
+    新聞摘要 + 有利題材 + 不利題材 + 多空判斷
     """
     theme   = impact.get("theme", "")
     tw_list = impact.get("tw_stocks", [])
-
-    # 提供完整的代碼+名稱對照，避免 Claude 編造錯誤代碼
     stock_list_str = "\n".join(
-        f"  - {ticker} {name}"
-        for ticker, name in tw_list[:6]
+        f"  - {ticker} {name}" for ticker, name in tw_list[:6]
     ) if tw_list else "  （無特定台股）"
 
     api_key = get_api_key()
@@ -267,21 +263,22 @@ def zh_news_analysis(news_item: Dict, impact: Dict) -> str:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         prompt = (
-            f"你是台股操盤手，請分析以下英文新聞對台股的影響。\n\n"
+            f"你是台股操盤手助理，請針對以下新聞給出完整分析。\n\n"
             f"新聞：{news_item['title']}\n"
-            f"題材：{theme or '一般財經'}\n\n"
-            f"以下是可能受影響的台股（只能從這個清單選，不可使用清單以外的代碼）：\n"
+            f"題材分類：{theme or '一般財經'}\n"
+            f"可能相關台股（代碼名稱如下，請只使用這些，不可自行發明）：\n"
             f"{stock_list_str}\n\n"
-            f"請用繁體中文回答，格式如下（嚴格按照格式，代碼必須從上方清單選）：\n\n"
-            f"摘要：（1句話說明新聞重點）\n"
-            f"看多：（上方清單中受益的股票，格式「代碼名稱」，沒有則填「無」）\n"
-            f"看空：（上方清單中受害的股票，格式「代碼名稱」，沒有則填「無」）\n"
-            f"理由：（1句說明邏輯）\n\n"
-            f"注意：代碼必須完全正確，例如旺宏是2337、南亞科是2408，不可自行猜測。"
+            f"請用繁體中文，嚴格按以下格式輸出：\n\n"
+            f"新聞重點：（1~2句說清楚這則新聞的事實）\n\n"
+            f"有利題材：（哪些產業/族群受益，例：AI伺服器、記憶體，若無則填「無」）\n"
+            f"有利台股：（上方清單中受益的股票「代碼+名稱」，最多3支，若無則填「無」）\n\n"
+            f"不利題材：（哪些產業/族群受害，若無則填「無」）\n"
+            f"不利台股：（上方清單中受害的股票「代碼+名稱」，最多3支，若無則填「無」）\n\n"
+            f"整體方向：（一句話：這對台股整體是偏多/偏空/中性，並說明理由）"
         )
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=200,
+            max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
         )
         return msg.content[0].text.strip()
@@ -291,8 +288,8 @@ def zh_news_analysis(news_item: Dict, impact: Dict) -> str:
             return "💳 API 額度不足，請到 console.anthropic.com/settings/billing 充值。"
         if impact.get("matched"):
             names = "、".join(n for _, n in tw_list[:3])
-            return f"【{theme}】消息，{names} 明日值得留意。（AI錯誤：{err[:40]}）"
-        return ""
+            return f"【{theme}】消息，{names} 明日值得留意。"
+        return f"AI 分析暫時失敗：{err[:60]}"
 
 
 # ── 自動中文摘要（無需按鈕，顯示在標題下方）────────────────────────────
@@ -399,50 +396,33 @@ def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
             )
         items_str = "\n".join(items_str_parts)
 
+        # 只要中文標題一行，乾淨不分析
+        titles_only = "\n".join(
+            f"{i+1}. {n['title']}" for i, n in enumerate(news_list[:15])
+        )
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=1200,
+            max_tokens=500,
             messages=[{"role": "user", "content": (
-                f"你是台股投資人，請分析以下每則英文財經新聞，用繁體中文輸出。\n\n"
-                f"每則格式（嚴格按照，不要多餘文字）：\n"
-                f"N| 重點：（1句話說清楚誰做了什麼，20~30字）\n"
-                f"N| 趨勢：（市場方向，10~15字）\n"
-                f"N| 多空：看多→XXX / 看空→XXX（只用台股名稱，沒有填「無」）\n\n"
+                f"請將以下英文新聞標題翻成繁體中文，每則用一句話（20~35字）說清楚「誰做了什麼事」。\n"
+                f"格式：數字. 中文標題（直接說重點，不要加評論或分析）\n\n"
                 f"範例：\n"
-                f"1| 重點：輝達 Q2 財報大幅超預期，AI 晶片需求爆發強勁，股價盤後漲 8%\n"
-                f"1| 趨勢：AI 資本支出加速，算力供應鏈全面受惠\n"
-                f"1| 多空：看多→廣達、英業達、奇鋐 / 看空→無\n\n"
-                f"新聞：\n{items_str}"
+                f"1. 輝達第二季財報大幅超越預期，AI 晶片需求持續爆發，股價盤後上漲 8%\n"
+                f"2. 文藝復興基金減持美光科技持股約 2 千萬美元\n\n"
+                f"新聞：\n{titles_only}"
             )}],
         )
         text = msg.content[0].text
-
-        # 解析多行格式 N| 標籤: 內容
-        current = {}
         for line in text.strip().split("\n"):
             line = line.strip()
             if not line:
                 continue
-            m = re.match(r"^(\d+)\s*[|\|]\s*(重點|趨勢|多空)：?\s*(.+)$", line)
+            m = re.match(r"^(\d+)[\.。、]\s*(.+)$", line)
             if m:
-                idx  = int(m.group(1)) - 1
-                tag  = m.group(2)
-                body = m.group(3).strip()
-                if 0 <= idx < len(news_list):
-                    if idx not in current:
-                        current[idx] = {}
-                    current[idx][tag] = body
-
-        for idx, parts in current.items():
-            lines = []
-            if "重點" in parts:
-                lines.append(f"📌 {parts['重點']}")
-            if "趨勢" in parts:
-                lines.append(f"📈 趨勢：{parts['趨勢']}")
-            if "多空" in parts:
-                lines.append(f"⚡ {parts['多空']}")
-            if lines:
-                result[idx] = "\n".join(lines)
+                idx     = int(m.group(1)) - 1
+                summary = m.group(2).strip()
+                if 0 <= idx < len(news_list) and summary:
+                    result[idx] = summary
         return result
     except Exception:
         # 失敗降級為關鍵字版
