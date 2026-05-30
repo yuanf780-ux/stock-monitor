@@ -157,10 +157,12 @@ with st.sidebar:
         "族群分析",
         "台美對照 & 供應鏈",
     ]
-    page = st.radio("頁面", _pages,
-        index=_pages.index(st.session_state.page)
-              if st.session_state.page in _pages else 0,
-        key="nav_radio")
+    # 強制讓 radio widget 與 session_state.page 同步
+    # （直接寫入 widget key，不靠 index 參數）
+    if st.session_state.page in _pages:
+        st.session_state["nav_radio"] = st.session_state.page
+
+    page = st.radio("頁面", _pages, key="nav_radio")
     st.session_state.page = page
 
     st.divider()
@@ -1346,14 +1348,14 @@ def page_twus():
             st.caption(mapping["theme"])
             for t, n, note in mapping["tw"]:
                 st.markdown(_card(t, n, note, mapping["color"]), unsafe_allow_html=True)
-                if st.button("🔬", key=f"twus_tw_{t}", help=f"分析 {n}"):
+                if st.button("分析", key=f"twus_tw_{t}", help=f"分析 {n}"):
                     goto_detail(t, n)
 
         with col_us:
             st.markdown("##### 🇺🇸 對應美股")
             for t, n, note in mapping["us"]:
                 st.markdown(_card(t, n, note, "#f59e0b"), unsafe_allow_html=True)
-                if st.button("🔬", key=f"twus_us_{t}", help=f"分析 {n}"):
+                if st.button("分析", key=f"twus_us_{t}", help=f"分析 {n}"):
                     goto_detail(t, n)
 
         if mapping.get("etf"):
@@ -1598,7 +1600,7 @@ def page_us_signal():
                        '<div style="color:#6b7280;font-size:0.82em">— 暫無報價</div>') +
                     f'<div style="color:#6b7280;font-size:0.72em;margin-top:2px">{note}</div>'
                     f'</div>', unsafe_allow_html=True)
-                if st.button("🔬", key=f"uss_{sym}_{t}_{i}", help=f"分析 {n}",
+                if st.button("分析", key=f"uss_{sym}_{t}_{i}", help=f"分析 {n}",
                              use_container_width=True):
                     goto_detail(t, n)
 
