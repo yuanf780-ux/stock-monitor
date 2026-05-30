@@ -133,11 +133,18 @@ with st.sidebar:
 
     st.divider()
     st.markdown("**快速搜尋個股**")
-    search_q = st.text_input("輸入代碼", placeholder="2330.TW 或 NVDA",
-                             key="quick_search", label_visibility="collapsed")
-    if st.button("搜尋分析", use_container_width=True) and search_q.strip():
-        goto_detail(search_q.strip().upper())
-        st.rerun()
+    with st.form("sidebar_search", clear_on_submit=True):
+        search_q = st.text_input("輸入代碼", placeholder="2330.TW 或 NVDA",
+                                  label_visibility="collapsed")
+        if st.form_submit_button("搜尋分析", use_container_width=True):
+            q = search_q.strip().upper()
+            if q:
+                # 台股自動補 .TW
+                if q.isdigit():
+                    q = q + ".TW"
+                st.session_state.detail_ticker = q
+                st.session_state.page = "個股深度分析"
+                st.rerun()
 
     st.divider()
     st.markdown("**自選股管理**")
@@ -495,15 +502,35 @@ def page_detail():
         st.error(f"找不到 {ticker} 的資料，請確認代碼正確（台股要加 .TW，如 2330.TW）")
         return
 
-    # 歷史資料選項（用 radio，不用下拉）
-    period_map = {"3 個月": "3mo", "6 個月": "6mo", "1 年": "1y", "2 年": "2y"}
-    period_label = st.radio("K 線顯示區間", list(period_map.keys()),
-                            index=1, horizontal=True)
-    period = period_map[period_label]
-    if period != "6mo":
-        df_h = fetch_history(ticker, period=period)
+    # K 線區間選擇
+    period_options = ["3 個月", "6 個月", "1 年", "2 年", "自訂區間"]
+    period_map     = {"3 個月": "3mo", "6 個月": "6mo", "1 年": "1y", "2 年": "2y"}
+    period_label   = st.radio("K 線區間", period_options, index=1, horizontal=True)
 
-    if not info.get("valid") or df_h is None:
+    if period_label == "自訂區間":
+        import datetime as _dt
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            custom_start = st.date_input("開始日期",
+                value=_dt.date.today() - _dt.timedelta(days=365),
+                max_value=_dt.date.today() - _dt.timedelta(days=2))
+        with col_d2:
+            custom_end = st.date_input("結束日期",
+                value=_dt.date.today(),
+                max_value=_dt.date.today())
+        try:
+            stock_obj = __import__("yfinance").Ticker(ticker)
+            df_h = stock_obj.history(start=str(custom_start), end=str(custom_end))
+            if not df_h.empty:
+                df_h.index = __import__("pandas").to_datetime(df_h.index).tz_localize(None)
+        except Exception:
+            df_h = fetch_history(ticker, period="1y")
+    else:
+        period = period_map[period_label]
+        if period != "6mo":
+            df_h = fetch_history(ticker, period=period)
+
+    if not info.get("valid") or df_h is None or df_h.empty:
         st.error(f"找不到 {ticker} 的資料"); return
 
     df = compute_all(df_h)
@@ -779,79 +806,95 @@ def page_detail():
                 chain_prices = _batch_prices(tuple(sorted(chain_tickers)))
 
             # ── Plotly Flow Diagram ────────────────────────────────────────
-            def _build_flow_fig(chain, ticker, info, chain_prices):
-                layers = {
-                    "upstream":   (0, "#3b82f6"),
-                    "core":       (1, "#f97316"),
-                    "midstream":  (2, "#8b5cf6"),
-                    "downstream": (3, "#10b981"),
-                    "related":    (4, "#f59e0b"),
-                }
-                nodes_x, nodes_y, node_text, node_color, node_size = [], [], [], [], []
-                hover_texts = []
-
-                def add_nodes(items, layer, color, is_core=False):
-                    n = max(len(items), 1)
-                    for i, (t, nm, note) in enumerate(items):
-                        x = layer
-                        y = i - (n - 1) / 2
-                        nodes_x.append(x); nodes_y.append(y)
-                        p = chain_prices.get(t, {})
-                        price_txt = f"{p['price']:,.2f}  {'▲' if p['pct']>=0 else '▼'}{p['pct']:+.2f}%" if p else "—"
-                        node_text.append(f"{nm}\n{price_txt}")
-                        node_color.append(color)
-                        node_size.append(22 if is_core else 14)
-                        hover_texts.append(f"<b>{nm}</b> ({t})<br>{note}<br>{price_txt}")
-
-                all_nodes = []
-                up = chain.get("upstream", [])
-                mid = chain.get("midstream", [])
-                dn = chain.get("downstream", [])
-                rel = chain.get("related", [])
-                core_info = info if isinstance(info, dict) else {}
-                p_core = chain_prices.get(ticker, {})
-                core_price = f"{p_core['price']:,.2f}  {'▲' if p_core.get('pct',0)>=0 else '▼'}{p_core.get('pct',0):+.2f}%" if p_core else f"{core_info.get('price',0):,.2f}"
-
-                add_nodes(up, 0, "#3b82f6")
-                add_nodes([(ticker, chain.get("name", ticker), chain.get("desc","")[:40])], 1, "#f97316", True)
-                if mid:
-                    add_nodes(mid, 2, "#8b5cf6")
-                add_nodes(dn, 3 if mid else 2, "#10b981")
-                if rel:
-                    add_nodes(rel, 4 if mid else 3, "#f59e0b")
-
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=nodes_x, y=nodes_y,
-                    mode="markers+text",
-                    marker=dict(size=node_size, color=node_color, opacity=0.9,
-                                line=dict(color="#1e293b", width=2)),
-                    text=node_text,
-                    textposition="middle right",
-                    hovertext=hover_texts,
-                    hoverinfo="text",
-                ))
-                layer_labels = {0: "⬆️ 上游", 1: "🎯 本股", 2: "🔄 中游" if mid else "⬇️ 下游",
-                                3: "⬇️ 下游" if mid else "🔗 相關", 4: "🔗 相關"}
-                for lx, lt in layer_labels.items():
-                    fig.add_annotation(x=lx, y=max(len(up),len(mid),len(dn),1)/2 + 0.8,
-                        text=f"<b>{lt}</b>", showarrow=False,
-                        font=dict(color="#9ca3af", size=11))
-                fig.update_layout(
-                    template="plotly_dark", height=420,
-                    margin=dict(l=10, r=120, t=30, b=10),
-                    xaxis=dict(visible=False, range=[-0.5, 5]),
-                    yaxis=dict(visible=False),
-                    showlegend=False,
-                    paper_bgcolor="#0f172a",
-                    plot_bgcolor="#0f172a",
+            # ── 供應鏈流程表（橫向 5 欄，乾淨不重疊）─────────────────────
+            def _node_cell(t, nm, note, border_color, chain_prices):
+                p = chain_prices.get(t, {})
+                if p:
+                    pct = p.get("pct", 0)
+                    pc  = "#4ade80" if pct >= 0 else "#f87171"
+                    ar  = "▲" if pct >= 0 else "▼"
+                    price_html = (
+                        f'<div style="font-size:1em;font-weight:700;color:#fff">{p["price"]:,.2f}</div>'
+                        f'<div style="font-size:0.75em;color:{pc}">{ar} {pct:+.2f}%</div>'
+                    )
+                else:
+                    price_html = '<div style="font-size:0.8em;color:#475569">—</div>'
+                return (
+                    f'<div style="background:#1e293b;border-left:3px solid {border_color};'
+                    f'border-radius:7px;padding:8px 10px;margin:3px 0;min-width:120px;">'
+                    f'<div style="font-size:0.72em;color:#64748b">{t}</div>'
+                    f'<div style="font-size:0.88em;font-weight:600;color:#e2e8f0">{nm}</div>'
+                    f'{price_html}'
+                    f'<div style="font-size:0.68em;color:#475569;margin-top:2px">{note[:28]}</div>'
+                    f'</div>'
                 )
-                return fig
 
-            with st.expander("🗺️ 供應鏈視覺流程圖", expanded=True):
-                flow_fig = _build_flow_fig(chain, ticker, info, chain_prices)
-                st.plotly_chart(flow_fig, use_container_width=True,
-                                config={"displayModeBar": False})
+            up_items  = chain.get("upstream",   [])
+            mid_items = chain.get("midstream",  [])
+            dn_items  = chain.get("downstream", [])
+            rel_items = chain.get("related",    [])
+
+            p_core = chain_prices.get(ticker, {})
+            pct_c  = p_core.get("pct", info.get("change_pct", 0)) if p_core else info.get("change_pct", 0)
+            price_c = p_core.get("price", info.get("price", 0)) if p_core else info.get("price", 0)
+            pc_c  = "#4ade80" if pct_c >= 0 else "#f87171"
+            ar_c  = "▲" if pct_c >= 0 else "▼"
+
+            core_html = (
+                f'<div style="background:#1e3a5f;border:2px solid #f97316;border-radius:10px;'
+                f'padding:12px 14px;text-align:center;">'
+                f'<div style="font-size:0.72em;color:#94a3b8">{ticker}</div>'
+                f'<div style="font-size:1.1em;font-weight:700;color:#fff">{chain.get("name","")}</div>'
+                f'<div style="font-size:1.4em;font-weight:800;color:#fff">{price_c:,.2f}</div>'
+                f'<div style="color:{pc_c};font-weight:700">{ar_c} {pct_c:+.2f}%</div>'
+                f'</div>'
+            )
+
+            # 欄位 HTML
+            def _col(title, color, items):
+                cells = "".join(_node_cell(t, n, note, color, chain_prices) for t, n, note in items)
+                return (
+                    f'<div style="flex:1;min-width:130px;">'
+                    f'<div style="font-size:0.72em;font-weight:700;color:{color};'
+                    f'margin-bottom:6px;text-align:center">{title}</div>'
+                    f'{cells}'
+                    f'</div>'
+                )
+
+            cols_html = [
+                _col("上游", "#3b82f6", up_items),
+                f'<div style="display:flex;align-items:center;padding:0 8px;color:#64748b;font-size:1.2em">→</div>',
+                f'<div style="flex:0 0 160px"><div style="font-size:0.72em;font-weight:700;color:#f97316;margin-bottom:6px;text-align:center">本股</div>{core_html}</div>',
+            ]
+            if mid_items:
+                cols_html += [
+                    f'<div style="display:flex;align-items:center;padding:0 8px;color:#64748b;font-size:1.2em">→</div>',
+                    _col("中游", "#8b5cf6", mid_items),
+                ]
+            cols_html += [
+                f'<div style="display:flex;align-items:center;padding:0 8px;color:#64748b;font-size:1.2em">→</div>',
+                _col("下游", "#10b981", dn_items),
+            ]
+
+            flow_html = (
+                f'<div style="display:flex;align-items:flex-start;gap:4px;'
+                f'overflow-x:auto;padding:12px;background:#0f172a;border-radius:10px;">'
+                + "".join(cols_html) +
+                f'</div>'
+            )
+
+            st.markdown("**供應鏈流程圖（上游 → 本股 → 下游）**")
+            st.markdown(flow_html, unsafe_allow_html=True)
+
+            if rel_items:
+                st.markdown("**同業 / 相關公司**")
+                rel_html = (
+                    f'<div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;'
+                    f'background:#0f172a;border-radius:8px;">'
+                    + "".join(_node_cell(t, n, note, "#f59e0b", chain_prices) for t, n, note in rel_items) +
+                    f'</div>'
+                )
+                st.markdown(rel_html, unsafe_allow_html=True)
 
             # ── Clickable card sections ────────────────────────────────────
             def _chain_cards(title, color, items, prices_dict, section_key):
