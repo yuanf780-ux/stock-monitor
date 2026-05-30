@@ -125,6 +125,45 @@ st.markdown("""<style>
 }
 </style>""", unsafe_allow_html=True)
 
+# ══════════════════════════════════════════════════════════════════════════
+# ── 密碼保護（必須輸入正確密碼才能使用）─────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+def _check_password() -> bool:
+    """回傳 True 代表已通過驗證"""
+    # 從 secrets 或環境變數取密碼
+    try:
+        correct_pw = st.secrets.get("APP_PASSWORD", "")
+    except Exception:
+        correct_pw = ""
+    if not correct_pw:
+        # 沒設密碼 → 直接放行
+        return True
+    if st.session_state.get("_authenticated"):
+        return True
+    # 顯示登入畫面
+    st.markdown("""
+    <div style="max-width:420px;margin:80px auto;background:#1e293b;border-radius:14px;
+                padding:36px 32px;text-align:center">
+        <div style="font-size:2.2em;margin-bottom:8px">📈</div>
+        <div style="font-size:1.4em;font-weight:700;color:#f1f5f9;margin-bottom:4px">股票監控系統</div>
+        <div style="color:#64748b;font-size:0.9em;margin-bottom:24px">請輸入授權密碼</div>
+    </div>
+    """, unsafe_allow_html=True)
+    col = st.columns([1, 2, 1])[1]
+    with col:
+        pw = st.text_input("密碼", type="password", label_visibility="collapsed",
+                           placeholder="輸入密碼…")
+        if st.button("進入", use_container_width=True, type="primary"):
+            if pw == correct_pw:
+                st.session_state["_authenticated"] = True
+                st.rerun()
+            else:
+                st.error("密碼錯誤，請重試。")
+    st.stop()
+    return False
+
+_check_password()
+
 # ── Session State ──────────────────────────────────────────────────────────
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = [*DEFAULT_TW_STOCKS, *DEFAULT_US_STOCKS]
