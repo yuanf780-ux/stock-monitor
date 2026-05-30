@@ -139,6 +139,7 @@ def goto_detail(ticker: str, name: str = ""):
     st.session_state.detail_ticker = ticker
     st.session_state.detail_name = name
     st.session_state.page = "個股深度分析"
+    st.rerun()
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
@@ -840,7 +841,7 @@ def page_detail():
                 with sc_cols[i % 4]:
                     n = sc.SUPPLY_CHAIN[t].get("name", t)
                     if st.button(f"{n}\n{t}", key=f"sc_jump_{t}", use_container_width=True):
-                        goto_detail(t, n); st.rerun()
+                        goto_detail(t, n)
         else:
             st.markdown(f"#### 🌳 {chain.get('name',ticker)} 供應鏈地圖")
             st.caption(chain.get("desc", ""))
@@ -1335,14 +1336,14 @@ def page_twus():
             for t, n, note in mapping["tw"]:
                 st.markdown(_card(t, n, note, mapping["color"]), unsafe_allow_html=True)
                 if st.button("🔬", key=f"twus_tw_{t}", help=f"分析 {n}"):
-                    goto_detail(t, n); st.rerun()
+                    goto_detail(t, n)
 
         with col_us:
             st.markdown("##### 🇺🇸 對應美股")
             for t, n, note in mapping["us"]:
                 st.markdown(_card(t, n, note, "#f59e0b"), unsafe_allow_html=True)
                 if st.button("🔬", key=f"twus_us_{t}", help=f"分析 {n}"):
-                    goto_detail(t, n); st.rerun()
+                    goto_detail(t, n)
 
         if mapping.get("etf"):
             st.markdown("**相關 ETF：** " + "　".join(
@@ -1588,7 +1589,7 @@ def page_us_signal():
                     f'</div>', unsafe_allow_html=True)
                 if st.button("🔬", key=f"uss_{sym}_{t}_{i}", help=f"分析 {n}",
                              use_container_width=True):
-                    goto_detail(t, n); st.rerun()
+                    goto_detail(t, n)
 
         st.markdown("<div style='margin-bottom:16px'></div>", unsafe_allow_html=True)
 
@@ -1789,7 +1790,7 @@ def page_cycle():
                     f'</div>', unsafe_allow_html=True)
             with col_btn:
                 if st.button("深度分析", key=f"wl_cy_{tk}", use_container_width=True):
-                    goto_detail(tk, name); st.rerun()
+                    goto_detail(tk, name)
 
     # ── 即時新聞 + 中文解析 + 產業影響 ──────────────────────────────────
     st.divider()
