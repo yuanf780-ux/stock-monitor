@@ -295,6 +295,133 @@ def zh_news_analysis(news_item: Dict, impact: Dict) -> str:
         return ""
 
 
+# ── 自動中文摘要（無需按鈕，顯示在標題下方）────────────────────────────
+
+# 關鍵字替換（無 API 時的基礎版）
+# 句型模板（優先比對）
+_PATTERNS = [
+    ("hits.*trillion", "市值突破兆元大關"),
+    ("market cap", "市值"),
+    ("earnings beat", "財報超預期"),
+    ("earnings miss", "財報不如預期"),
+    ("price target.*raised", "目標價上調"),
+    ("price target.*lowered", "目標價下調"),
+    ("record high", "創歷史新高"),
+    ("all.time high", "創歷史新高"),
+    ("52.week high", "創52週新高"),
+    ("layoff", "宣布裁員"),
+    ("laid off", "宣布裁員"),
+    ("ipo", "即將 IPO 上市"),
+    ("stock split", "宣布股票分割"),
+    ("buyback", "啟動庫藏股回購"),
+    ("dividend", "公告配息"),
+    ("acquisition", "宣布收購"),
+    ("merger", "合併計畫"),
+    ("partnership", "宣布合作"),
+    ("sells.*shares", "減持持股"),
+    ("increases.*stake", "增持股份"),
+    ("buys.*stake", "買進股份"),
+    ("top holdings", "主要持股"),
+    ("concentration risk", "集中風險"),
+    ("ai demand", "AI 需求強勁"),
+    ("data center", "資料中心需求"),
+]
+
+_KW = {
+    "earnings": "財報", "revenue": "營收", "profit": "獲利", "sales": "銷售",
+    "beat": "超標", "miss": "未達預期", "guidance": "展望調整",
+    "upgrade": "評級調升", "downgrade": "評級調降",
+    "overweight": "增持評級", "outperform": "優於大盤",
+    "deal": "合約簽署", "layoffs": "宣布裁員", "hiring": "擴大招聘",
+    "dividend": "配息", "buyback": "回購股票",
+    "AI": "AI 相關", "chip": "晶片", "semiconductor": "半導體",
+    "memory": "記憶體", "data center": "資料中心", "server": "伺服器",
+    "electric vehicle": "電動車", "EV": "電動車", "battery": "電池",
+    "inflation": "通膨", "rate cut": "降息預期", "fed": "Fed 政策",
+    "price target": "目標價", "risk": "風險", "rally": "股價上漲",
+}
+
+def _quick_zh(title: str) -> str:
+    """不需 API，用模板+關鍵字快速生成中文摘要"""
+    import re as _re
+    t = title.lower()
+    # 公司名稱對照
+    companies = {
+        "nvidia": "輝達", "apple": "蘋果", "microsoft": "微軟",
+        "google": "谷歌", "alphabet": "Alphabet", "amazon": "亞馬遜",
+        "tesla": "特斯拉", "meta": "Meta", "micron": "美光",
+        "amd": "超微", "tsmc": "台積電", "qualcomm": "高通",
+        "broadcom": "博通", "intel": "英特爾", "dell": "戴爾",
+        "hpe": "惠普企業", "supermicro": "超微電腦", "arm": "Arm",
+        "sk hynix": "SK海力士", "samsung": "三星",
+        "warren buffett": "巴菲特", "renaissance": "文藝復興基金",
+    }
+    corp = next((zh for en, zh in companies.items() if en in t), "")
+    # 句型模板優先
+    for pat, desc in _PATTERNS:
+        if _re.search(pat, t):
+            return f"{corp}：{desc}" if corp else desc
+    # 關鍵字組合
+    hits = [zh for en, zh in _KW.items() if en.lower() in t]
+    parts = ([corp] if corp else []) + hits[:2]
+    return "・".join(parts) if parts else ""
+
+
+def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
+    """
+    批次生成所有新聞的中文摘要（一行，自動顯示）。
+    有 API Key → 用 Claude Haiku 一次翻譯所有標題（1 個 API 呼叫）
+    沒有 API → 用關鍵字快速生成
+    """
+    result: Dict[int, str] = {}
+
+    api_key = get_api_key()
+    if not api_key:
+        # 無 API：關鍵字版
+        for i, n in enumerate(news_list):
+            s = _quick_zh(n["title"])
+            if s:
+                result[i] = s
+        return result
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+        titles_str = "\n".join(
+            f"{i+1}. {n['title']}" for i, n in enumerate(news_list[:15])
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+            messages=[{"role": "user", "content": (
+                f"請將以下英文新聞標題翻譯成繁體中文，每則用15字以內的一句話說明重點。\n"
+                f"格式：數字. 中文內容（不要說「關於」「此新聞」等廢話，直接說重點）\n\n"
+                f"{titles_str}"
+            )}],
+        )
+        text = msg.content[0].text
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            # 解析「1. 內容」格式
+            import re
+            m = re.match(r"^(\d+)[\.。、]\s*(.+)$", line)
+            if m:
+                idx = int(m.group(1)) - 1
+                summary = m.group(2).strip()
+                if 0 <= idx < len(news_list) and summary:
+                    result[idx] = summary
+        return result
+    except Exception:
+        # 失敗降級為關鍵字版
+        for i, n in enumerate(news_list):
+            s = _quick_zh(n["title"])
+            if s:
+                result[i] = s
+        return result
+
+
 def ai_news_briefing(news_list: List[Dict], us_movers: List[Dict],
                      cycle_phase: str) -> str:
     """

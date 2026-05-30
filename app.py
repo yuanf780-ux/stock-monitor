@@ -440,6 +440,13 @@ def page_market():
     if not news_list:
         st.warning("新聞暫時無法載入，請點「重新載入新聞」")
     else:
+        # 自動批次生成中文摘要（1 個 API 呼叫搞定全部，或用關鍵字版）
+        auto_summary_key = "mkt_auto_summary"
+        if auto_summary_key not in st.session_state or reload_news:
+            with st.spinner("生成中文摘要…"):
+                st.session_state[auto_summary_key] = nf.batch_auto_summary(news_list)
+        auto_summaries = st.session_state.get(auto_summary_key, {})
+
         for idx, item in enumerate(news_list):
             impact   = nf.tag_news_impact(item["title"])
             color    = impact.get("color", "#374151")
@@ -467,18 +474,27 @@ def page_market():
                     + '</div>'
                 )
 
+            auto_zh = auto_summaries.get(idx, "")
+
             # 新聞卡片（全寬）
             st.markdown(
                 f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
                 f'border-left:3px solid {color};margin-bottom:2px">'
                 f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
-                f'<span style="color:#64748b;font-size:0.7em">🇹🇼 {item["time"]}</span>' f'&nbsp;·&nbsp;' f'<span style="color:#475569;font-size:0.7em">🇺🇸 {item.get("time_us","")}</span>'
+                f'<span style="color:#64748b;font-size:0.7em">🇹🇼 {item["time"]}</span>'
+                f'&nbsp;·&nbsp;'
+                f'<span style="color:#475569;font-size:0.7em">🇺🇸 {item.get("time_us","")}</span>'
+                f'&nbsp;&nbsp;'
                 f'<span style="color:#475569;font-size:0.7em">{item["publisher"][:18]}</span>'
                 f'{theme_badge}</div>'
-                f'<div style="color:#e2e8f0;font-size:0.88em;font-weight:500">'
-                f'<a href="{item["url"]}" target="_blank" style="color:#e2e8f0;text-decoration:none">'
-                f'{item["title"]}</a></div>'
-                f'{tw_chips}'
+                # 英文原標題
+                f'<div style="color:#94a3b8;font-size:0.78em">'
+                f'<a href="{item["url"]}" target="_blank" style="color:#94a3b8;text-decoration:none">'
+                f'{item["title"][:80]}{"…" if len(item["title"])>80 else ""}</a></div>'
+                # 中文摘要（粗體，主要閱讀區）
+                + (f'<div style="color:#e2e8f0;font-size:0.92em;font-weight:600;margin-top:3px">'
+                   f'{auto_zh}</div>' if auto_zh else "")
+                + f'{tw_chips}'
                 + (
                     f'<div style="margin-top:8px;padding:8px 12px;background:#0f172a;'
                     f'border-radius:6px;line-height:1.7;font-size:0.85em;white-space:pre-wrap;'
