@@ -248,6 +248,16 @@ def _batch_prices(tickers_tuple):
     return fetch_batch_prices(list(tickers_tuple))
 
 
+# 股票選單快取在模組層級，避免 page_detail 內部定義造成不穩定
+@st.cache_data(ttl=3600)
+def _all_stock_opts():
+    try:
+        opts = get_all_stock_options()
+        return opts if opts else []
+    except Exception:
+        return []
+
+
 def _price_html(ticker, prices):
     p = prices.get(ticker, {})
     if not p:
@@ -495,45 +505,48 @@ def page_watchlist():
 def page_detail():
     st.title("個股深度分析")
 
-    # ── 搜尋欄：下拉選單（打一個字就跳出建議）───────────────────────────
-    @st.cache_data(ttl=3600)
-    def _detail_options():
-        return get_all_stock_options()
-
-    all_opts = _detail_options()
-
-    # 找目前 ticker 對應的預設選項
+    # ── 搜尋欄 ────────────────────────────────────────────────────────────
     cur_ticker = st.session_state.get("detail_ticker", "")
-    default_idx = 0
-    if cur_ticker:
-        for i, opt in enumerate(all_opts):
-            if cur_ticker in opt:
-                default_idx = i
-                break
+    all_opts   = _all_stock_opts()
 
     col_sel, col_btn = st.columns([4, 1])
     with col_sel:
-        selected_opt = st.selectbox(
-            "搜尋股票",
-            all_opts,
-            index=default_idx,
-            key="detail_select",
-            label_visibility="collapsed",
-            help="輸入任意中文名稱、英文代碼或數字，即時篩選",
-        )
+        if all_opts:
+            # 找預設選項 index
+            default_idx = 0
+            if cur_ticker:
+                for i, opt in enumerate(all_opts):
+                    if cur_ticker in opt:
+                        default_idx = i
+                        break
+            selected_opt = st.selectbox(
+                "搜尋股票", all_opts, index=default_idx,
+                key="detail_select", label_visibility="collapsed",
+                help="輸入名稱、代碼或數字即時篩選",
+            )
+        else:
+            # 選單載入失敗時改用文字輸入
+            selected_opt = st.text_input(
+                "輸入代碼", value=cur_ticker,
+                placeholder="2330.TW / NVDA / 台積電",
+                key="detail_text", label_visibility="collapsed",
+            )
     with col_btn:
         go_btn = st.button("查詢", use_container_width=True, type="primary")
 
     if go_btn and selected_opt:
-        t, _ = option_to_ticker(selected_opt)
-        st.session_state.detail_ticker = t
+        raw = selected_opt.strip()
+        if "(" in raw and raw.endswith(")"):
+            t, _ = option_to_ticker(raw)
+        else:
+            t, _ = name_to_ticker(raw) if raw else (raw, raw)
+        st.session_state.detail_ticker = t.upper()
         st.rerun()
 
-    # 使用 session state 中已解析的 ticker
+    # 從 session state 取 ticker（包含 goto_detail 導航過來的情況）
     ticker = st.session_state.get("detail_ticker", "").strip().upper()
     if not ticker:
-        st.info("在上方下拉選單輸入名稱或代碼搜尋股票")
-        st.markdown("**常用股票快速點選：**")
+        st.info("搜尋股票或點下方快速選股")
         examples = [
             ("2330.TW","台積電"), ("2317.TW","鴻海"), ("2454.TW","聯發科"),
             ("NVDA","輝達"),      ("AAPL","蘋果"),     ("TSLA","特斯拉"),
@@ -546,8 +559,6 @@ def page_detail():
                     st.session_state.detail_ticker = t
                     st.rerun()
         return
-
-    st.session_state.detail_ticker = ticker
 
     # ── 載入資料 ─────────────────────────────────────────────────────────
     with st.spinner(f"載入 {ticker} 資料中…"):
