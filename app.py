@@ -5,7 +5,7 @@ import pandas as pd
 import time
 
 from config import DEFAULT_TW_STOCKS, DEFAULT_US_STOCKS, ALERT_DEFAULTS, INDICATOR_COLORS
-from data_fetcher import fetch_stock_info, fetch_history, fetch_batch_prices
+from data_fetcher import fetch_stock_info, fetch_history, fetch_batch_prices, name_to_ticker
 from indicators import compute_all, get_signals
 import ai_analyst
 import sector_data as sd
@@ -134,15 +134,14 @@ with st.sidebar:
     st.divider()
     st.markdown("**快速搜尋個股**")
     with st.form("sidebar_search", clear_on_submit=True):
-        search_q = st.text_input("輸入代碼", placeholder="2330.TW 或 NVDA",
+        search_q = st.text_input("輸入股票名稱或代碼",
+                                  placeholder="台積電 / 輝達 / 2330 / NVDA",
                                   label_visibility="collapsed")
         if st.form_submit_button("搜尋分析", use_container_width=True):
-            q = search_q.strip().upper()
+            q = search_q.strip()
             if q:
-                # 台股自動補 .TW
-                if q.isdigit():
-                    q = q + ".TW"
-                st.session_state.detail_ticker = q
+                ticker_resolved, _ = name_to_ticker(q)
+                st.session_state.detail_ticker = ticker_resolved
                 st.session_state.page = "個股深度分析"
                 st.rerun()
 
@@ -461,32 +460,37 @@ def page_watchlist():
 def page_detail():
     st.title("個股深度分析")
 
-    # ── 搜尋欄 ───────────────────────────────────────────────────────────
-    col_t, col_btn = st.columns([4, 1])
-    with col_t:
-        ticker_input = st.text_input("輸入股票代碼",
-            value=st.session_state.get("detail_ticker", ""),
-            placeholder="台股輸入 2330.TW，美股輸入 NVDA",
-            label_visibility="collapsed")
-    with col_btn:
-        do_search = st.button("查詢", use_container_width=True, type="primary")
+    # ── 搜尋欄（支援中文名稱）───────────────────────────────────────────
+    with st.form("detail_search_form", clear_on_submit=False):
+        col_t, col_btn = st.columns([4, 1])
+        with col_t:
+            ticker_input = st.text_input("輸入名稱或代碼",
+                value=st.session_state.get("detail_ticker", ""),
+                placeholder="台積電 / 鴻海 / 輝達 / 2330 / NVDA",
+                label_visibility="collapsed")
+        with col_btn:
+            do_search = st.form_submit_button("查詢", use_container_width=True)
 
-    ticker = ticker_input.strip().upper()
-    if do_search and ticker:
-        st.session_state.detail_ticker = ticker
+    raw_q = ticker_input.strip()
+    if do_search and raw_q:
+        resolved, _ = name_to_ticker(raw_q)
+        st.session_state.detail_ticker = resolved
         st.rerun()
 
+    # 用 session state 中的代碼（可能剛被 resolved）
+    ticker = st.session_state.get("detail_ticker", "").strip().upper()
     if not ticker:
-        st.info("在上方輸入股票代碼後按「查詢」，支援台股（2330.TW）和美股（NVDA、AAPL）")
-        st.markdown("**常見股票代碼範例：**")
+        st.info("輸入股票名稱或代碼後按「查詢」")
+        st.markdown("**直接點選常用股票：**")
         examples = [
             ("2330.TW","台積電"), ("2317.TW","鴻海"), ("2454.TW","聯發科"),
-            ("NVDA","輝達"), ("AAPL","蘋果"), ("TSLA","特斯拉"),
+            ("NVDA","輝達"),      ("AAPL","蘋果"),     ("TSLA","特斯拉"),
+            ("MU","美光"),        ("SMCI","超微電腦"),  ("AMD","超微"),
         ]
         ecols = st.columns(3)
         for i, (t, n) in enumerate(examples):
             with ecols[i % 3]:
-                if st.button(f"{n}  {t}", key=f"ex_{t}", use_container_width=True):
+                if st.button(f"{n}", key=f"ex_{t}", use_container_width=True):
                     st.session_state.detail_ticker = t
                     st.rerun()
         return

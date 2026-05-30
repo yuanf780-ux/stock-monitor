@@ -2,13 +2,57 @@ import yfinance as yf
 import requests
 import pandas as pd
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
-# ── 台股名稱快查表（避免 yfinance .info 失敗時沒有名稱）──────────────
-_TW_NAMES: Dict[str, str] = {}  # 延遲載入
+# ── 常見美股中文名稱對照 ──────────────────────────────────────────────
+_US_CN_MAP: Dict[str, str] = {
+    # AI / 半導體
+    "輝達": "NVDA", "英偉達": "NVDA", "nvidia": "NVDA",
+    "超微": "AMD",  "amd": "AMD",
+    "英特爾": "INTC", "intel": "INTC",
+    "博通": "AVGO", "broadcom": "AVGO",
+    "高通": "QCOM", "qualcomm": "QCOM",
+    "邁威爾": "MRVL", "marvell": "MRVL",
+    "艾司摩爾": "ASML", "asml": "ASML",
+    "應用材料": "AMAT", "amat": "AMAT",
+    "科磊": "LRCX", "lam": "LRCX",
+    "科磊檢測": "KLAC", "klac": "KLAC",
+    "超微電腦": "SMCI", "smci": "SMCI",
+    "美光": "MU", "micron": "MU",
+    "威騰": "WDC", "wdc": "WDC",
+    # 大型科技
+    "蘋果": "AAPL", "apple": "AAPL",
+    "微軟": "MSFT", "microsoft": "MSFT",
+    "谷歌": "GOOGL", "字母": "GOOGL", "google": "GOOGL", "alphabet": "GOOGL",
+    "亞馬遜": "AMZN", "amazon": "AMZN",
+    "臉書": "META", "meta": "META", "facebook": "META",
+    "特斯拉": "TSLA", "tesla": "TSLA",
+    "台積電adr": "TSM", "台積adr": "TSM", "tsm": "TSM",
+    # 伺服器 / 雲端
+    "戴爾": "DELL", "dell": "DELL",
+    "惠普企業": "HPE", "hpe": "HPE",
+    "維美德": "VRT", "vertiv": "VRT",
+    # 網路
+    "思科": "CSCO", "cisco": "CSCO",
+    "arista": "ANET", "阿里斯塔": "ANET",
+    # 航運
+    "以星": "ZIM", "zim": "ZIM",
+    # 生技
+    "禮來": "LLY", "lilly": "LLY",
+    "諾和諾德": "NVO", "novo": "NVO",
+    "直覺外科": "ISRG", "isrg": "ISRG",
+    # 金融
+    "摩根大通": "JPM", "jpmorgan": "JPM",
+    "美國銀行": "BAC", "bofa": "BAC",
+    "高盛": "GS", "goldman": "GS",
+}
+
+# ── 台股名稱快查表 ────────────────────────────────────────────────────
+_TW_NAMES:    Dict[str, str] = {}   # code / code.TW → name
+_TW_NAME2CODE: Dict[str, str] = {}  # name → code.TW
 
 def _get_tw_names() -> Dict[str, str]:
-    global _TW_NAMES
+    global _TW_NAMES, _TW_NAME2CODE
     if _TW_NAMES:
         return _TW_NAMES
     try:
@@ -17,14 +61,65 @@ def _get_tw_names() -> Dict[str, str]:
             headers={"User-Agent": "Mozilla/5.0"}, timeout=8
         )
         for d in r.json():
-            code = d.get("公司代號", "").strip()
-            name = d.get("公司簡稱", d.get("公司名稱", "")).strip()
-            if code and name:
-                _TW_NAMES[code] = name
-                _TW_NAMES[code + ".TW"] = name
+            code  = d.get("公司代號", "").strip()
+            short = d.get("公司簡稱", "").strip()
+            full  = d.get("公司名稱", "").strip()
+            if code:
+                name = short or full
+                _TW_NAMES[code]       = name
+                _TW_NAMES[code+".TW"] = name
+                # 名稱反查
+                if short:
+                    _TW_NAME2CODE[short] = code + ".TW"
+                if full:
+                    _TW_NAME2CODE[full]  = code + ".TW"
+                    # 去掉「股份有限公司」等後綴
+                    clean = (full.replace("股份有限公司","").replace("有限公司","")
+                             .replace("股份","").strip())
+                    if clean and clean != full:
+                        _TW_NAME2CODE[clean] = code + ".TW"
     except Exception:
         pass
     return _TW_NAMES
+
+
+def name_to_ticker(query: str) -> Tuple[str, str]:
+    """
+    把中文名稱或代碼轉換成 ticker。
+    回傳 (ticker, display_name) 。
+    若找不到對應名稱，原樣回傳 query 作為 ticker。
+    """
+    q = query.strip()
+    q_lower = q.lower().replace(" ", "")
+
+    # 1. 純數字 → 台股代碼
+    if q.isdigit():
+        return q + ".TW", q
+
+    # 2. 已是合法代碼格式
+    if "." in q or q.upper() in ("NVDA","AAPL","TSLA","MSFT","GOOGL","AMZN",
+                                   "META","AMD","INTC","AVGO","QCOM","MU",
+                                   "SMCI","DELL","TSM","ASML","AMAT","LRCX"):
+        return q.upper(), q.upper()
+
+    # 3. 美股中文名稱對照
+    us = _US_CN_MAP.get(q_lower) or _US_CN_MAP.get(q)
+    if us:
+        return us, us
+
+    # 4. 台股中文名稱查詢（用 TWSE 資料）
+    _get_tw_names()
+    tw = _TW_NAME2CODE.get(q)
+    if tw:
+        return tw, _TW_NAMES.get(tw, q)
+
+    # 5. 模糊比對：找包含 query 的第一個台股名稱
+    for name, code in _TW_NAME2CODE.items():
+        if q in name or name in q:
+            return code, name
+
+    # 6. 找不到，原樣回傳
+    return q.upper(), q
 
 
 def _fetch_tw_realtime(code: str) -> Optional[Dict[str, Any]]:
