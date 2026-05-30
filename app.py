@@ -137,8 +137,9 @@ if "pending_remove" not in st.session_state:
 
 def goto_detail(ticker: str, name: str = ""):
     st.session_state.detail_ticker = ticker
-    st.session_state.detail_name = name
-    st.session_state.page = "個股深度分析"
+    st.session_state.detail_name   = name
+    st.session_state.page          = "個股深度分析"
+    st.session_state["nav_radio"]  = "個股深度分析"
     st.rerun()
 
 
@@ -157,11 +158,6 @@ with st.sidebar:
         "族群分析",
         "台美對照 & 供應鏈",
     ]
-    # 強制讓 radio widget 與 session_state.page 同步
-    # （直接寫入 widget key，不靠 index 參數）
-    if st.session_state.page in _pages:
-        st.session_state["nav_radio"] = st.session_state.page
-
     page = st.radio("頁面", _pages, key="nav_radio")
     st.session_state.page = page
 
@@ -418,6 +414,88 @@ def page_market():
         st.caption("資料來源：Yahoo Finance / TAIFEX MIS。僅供參考，不構成投資建議。")
 
     _mkt()
+
+    # ── 即時財經新聞（在大盤頁底部，每則有中文解析）─────────────────────
+    st.divider()
+    st.markdown("### 即時財經新聞")
+
+    @st.cache_data(ttl=1800)
+    def _mkt_news():
+        return nf.fetch_stock_news(max_per_ticker=2)
+
+    col_nl, col_nr = st.columns([1, 3])
+    with col_nl:
+        reload_news = st.button("重新載入新聞", use_container_width=True)
+    with col_nr:
+        st.caption("每 30 分鐘自動更新 · 每則新聞可按「中文解析」取得 AI 分析")
+
+    if reload_news:
+        st.cache_data.clear()
+
+    with st.spinner("載入新聞中…"):
+        news_list = _mkt_news()
+
+    has_api = bool(nf.get_api_key())
+
+    if not news_list:
+        st.warning("新聞暫時無法載入，請點「重新載入新聞」")
+    else:
+        for idx, item in enumerate(news_list):
+            impact   = nf.tag_news_impact(item["title"])
+            color    = impact.get("color", "#374151")
+            theme    = impact.get("theme", "")
+            tw_list  = impact.get("tw_stocks", [])
+            cache_key = f"mkt_news_zh_{idx}"
+            saved_zh  = st.session_state.get(cache_key, "")
+
+            theme_badge = (
+                f'<span style="background:{color}22;color:{color};border-radius:4px;'
+                f'padding:1px 8px;font-size:0.7em;font-weight:600;margin-left:6px">'
+                f'{theme}</span>'
+            ) if theme else ""
+
+            tw_chips = ""
+            if tw_list:
+                tw_chips = (
+                    '<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:4px">'
+                    '<span style="color:#64748b;font-size:0.7em;align-self:center">台股 →</span>'
+                    + "".join(
+                        f'<span style="background:#0f172a;border:1px solid {color}55;'
+                        f'color:#e2e8f0;border-radius:4px;padding:2px 7px;font-size:0.7em">{n}</span>'
+                        for _, n in tw_list[:4]
+                    )
+                    + '</div>'
+                )
+
+            col_n, col_btn = st.columns([8, 1])
+            with col_n:
+                st.markdown(
+                    f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
+                    f'border-left:3px solid {color};">'
+                    f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">'
+                    f'<span style="color:#64748b;font-size:0.7em">{item["time"]}</span>'
+                    f'<span style="color:#475569;font-size:0.7em">{item["publisher"][:18]}</span>'
+                    f'{theme_badge}</div>'
+                    f'<div style="color:#e2e8f0;font-size:0.88em;font-weight:500">'
+                    f'<a href="{item["url"]}" target="_blank" style="color:#e2e8f0;text-decoration:none">'
+                    f'{item["title"]}</a></div>'
+                    f'{tw_chips}'
+                    + (
+                        f'<div style="margin-top:6px;padding:7px 10px;background:#0f172a;'
+                        f'border-radius:5px;color:#a5b4fc;font-size:0.82em;line-height:1.5">'
+                        f'{saved_zh}</div>'
+                        if saved_zh else ""
+                    )
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+            with col_btn:
+                if has_api:
+                    if st.button("中文解析", key=f"mkt_ai_{idx}", use_container_width=True):
+                        with st.spinner("分析中…"):
+                            zh = nf.zh_news_analysis(item, impact)
+                        st.session_state[cache_key] = zh
+                        st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════
