@@ -1141,20 +1141,46 @@ def page_sector():
 
     tab_rank, tab_detail, tab_predict = st.tabs(["📊 族群排行", "🔍 成分股查詢", "🤖 AI 輪動預測"])
 
+    # ── 共用時間區間選擇器 ────────────────────────────────────────────
+    import datetime as _dt
+    PERIOD_OPTS = ["當日", "當周", "這兩週", "這一個月", "這半年", "自訂"]
+    period_col1, period_col2 = st.columns([3, 2])
+    with period_col1:
+        sel_period = st.radio("統計區間", PERIOD_OPTS, index=1, horizontal=True,
+                              key="sector_period")
+    custom_s = custom_e = None
+    if sel_period == "自訂":
+        with period_col2:
+            dc1, dc2 = st.columns(2)
+            with dc1:
+                custom_s = st.date_input("起始", value=_dt.date.today()-_dt.timedelta(days=30),
+                                          max_value=_dt.date.today(), key="sec_cs")
+            with dc2:
+                custom_e = st.date_input("結束", value=_dt.date.today(),
+                                          max_value=_dt.date.today(), key="sec_ce")
+
+    period_label = sd.PERIOD_MAP.get(sel_period, {}).get("label", sel_period)
+
     with tab_rank:
-        st.markdown("#### 各族群近期漲跌排行")
+        st.markdown(f"#### 各族群漲跌排行（{period_label}）")
         col_load, col_info = st.columns([1, 3])
         with col_load:
-            load_perf = st.button("📊 載入族群績效", type="primary", use_container_width=True)
+            load_perf = st.button("載入族群績效", type="primary", use_container_width=True)
         with col_info:
-            st.caption("每族群取前 5 支代表股計算平均（約 30-60 秒）")
+            st.caption("每族群取前 5 支代表股計算平均漲跌幅（約 30-60 秒）")
 
         if load_perf:
-            with st.spinner("計算各族群績效…"):
-                perf_df = sd.compute_all_sector_perf(all_stocks_df, top_n=5)
-                st.session_state["sector_perf_df"] = perf_df
+            with st.spinner(f"計算各族群「{sel_period}」績效…"):
+                perf_df = sd.compute_all_sector_perf(
+                    all_stocks_df, top_n=5,
+                    period_key=sel_period,
+                    custom_start=custom_s, custom_end=custom_e,
+                )
+                st.session_state["sector_perf_df"]     = perf_df
+                st.session_state["sector_period_label"] = period_label
 
         perf_df = st.session_state.get("sector_perf_df", pd.DataFrame())
+        saved_label = st.session_state.get("sector_period_label", "")
         if not perf_df.empty:
             perf_sorted = perf_df.sort_values("ret_1w")
             colors = ["#22c55e" if v >= 0 else "#ef4444" for v in perf_sorted["ret_1w"]]
@@ -1165,56 +1191,65 @@ def page_sector():
                 textposition="outside",
             ))
             fig_hm.update_layout(template="plotly_dark",
-                height=max(400, len(perf_sorted)*22),
-                title="各族群近 1 週漲跌幅排行",
-                margin=dict(l=10, r=70, t=40, b=20),
+                height=max(400, len(perf_sorted)*23),
+                title=f"各族群漲跌幅排行（{saved_label}）",
+                margin=dict(l=10, r=80, t=40, b=20),
                 xaxis_title="漲跌幅 (%)")
             st.plotly_chart(fig_hm, use_container_width=True)
 
             display = perf_df.copy()
             display["排名"] = range(1, len(display)+1)
-            display["近1週"] = display["ret_1w"].apply(lambda x: f"{'▲' if x>=0 else '▼'} {x:+.2f}%")
-            display["近1月"] = display["ret_1m"].apply(lambda x: f"{'▲' if x>=0 else '▼'} {x:+.2f}%" if x is not None else "—")
-            st.dataframe(display[["排名","sector","近1週","近1月","n_stocks"]].rename(
-                columns={"sector":"族群","n_stocks":"樣本數"}),
+            display["漲跌幅"] = display["ret_1w"].apply(
+                lambda x: f"{'▲' if x>=0 else '▼'} {x:+.2f}%")
+            st.dataframe(
+                display[["排名","sector","漲跌幅","n_stocks"]].rename(
+                    columns={"sector": "族群", "n_stocks": "樣本數"}),
                 use_container_width=True, hide_index=True)
 
     with tab_detail:
         sel_sector = st.selectbox("選擇族群", sector_list)
         sector_stocks = sd.get_stocks_in_sector(all_stocks_df, sel_sector)
-        st.markdown(f"**{sel_sector}** 共 {len(sector_stocks)} 檔")
+        st.markdown(f"**{sel_sector}** 共 {len(sector_stocks)} 檔  ·  統計區間：{period_label}")
 
-        fetch_btn = st.button("📈 查詢族群近期表現", use_container_width=True)
-        with st.expander(f"成分股清單", expanded=True):
+        fetch_btn = st.button("查詢族群個股表現", use_container_width=True)
+        with st.expander("成分股清單", expanded=False):
             st.dataframe(sector_stocks[["code","short_name","ticker"]].rename(
                 columns={"code":"代碼","short_name":"名稱","ticker":"Yahoo代碼"}),
                 use_container_width=True, hide_index=True)
 
         if fetch_btn:
-            with st.spinner("取得族群績效…"):
-                perf = sd.fetch_sector_performance(sector_stocks, top_n=15)
+            with st.spinner(f"取得「{sel_sector}」{period_label}績效…"):
+                perf = sd.fetch_sector_performance(
+                    sector_stocks, top_n=15,
+                    period_key=sel_period,
+                    custom_start=custom_s, custom_end=custom_e,
+                )
             if not perf.empty:
-                perf_s = perf.sort_values("ret_1w")
-                colors_s = ["#22c55e" if (v is not None and v>=0) else "#ef4444" for v in perf_s["ret_1w"]]
+                perf_s = perf.sort_values("ret")
+                colors_s = ["#22c55e" if (v is not None and v>=0) else "#ef4444"
+                            for v in perf_s["ret"]]
                 fig_s = go.Figure(go.Bar(
-                    y=perf_s["name"], x=perf_s["ret_1w"],
+                    y=perf_s["name"], x=perf_s["ret"],
                     orientation="h", marker_color=colors_s,
-                    text=[f"{v:+.1f}%" if v else "" for v in perf_s["ret_1w"]],
+                    text=[f"{v:+.1f}%" if v else "" for v in perf_s["ret"]],
                     textposition="outside",
                 ))
                 fig_s.update_layout(template="plotly_dark",
-                    height=max(280, len(perf_s)*26),
-                    margin=dict(l=10, r=60, t=10, b=20),
-                    xaxis_title="近1週漲跌%")
+                    height=max(280, len(perf_s)*28),
+                    margin=dict(l=10, r=70, t=10, b=20),
+                    xaxis_title=f"{period_label}漲跌%")
                 st.plotly_chart(fig_s, use_container_width=True)
 
-                add_sel = st.multiselect("加入自選股", options=perf["ticker"].tolist(),
-                    format_func=lambda t: perf.loc[perf["ticker"]==t,"name"].values[0] if not perf.loc[perf["ticker"]==t].empty else t)
-                if st.button("➕ 加入", key="sector_add_btn"):
+                add_sel = st.multiselect("加入自選股",
+                    options=perf["ticker"].tolist(),
+                    format_func=lambda t: perf.loc[perf["ticker"]==t,"name"].values[0]
+                               if not perf.loc[perf["ticker"]==t].empty else t)
+                if st.button("加入", key="sector_add_btn"):
                     for t in add_sel:
                         n = perf.loc[perf["ticker"]==t,"name"].values
                         if not any(w["ticker"]==t for w in st.session_state.watchlist):
-                            st.session_state.watchlist.append({"ticker":t,"name":n[0] if len(n) else t})
+                            st.session_state.watchlist.append(
+                                {"ticker":t,"name":n[0] if len(n) else t})
                     st.success(f"已加入 {len(add_sel)} 檔"); st.rerun()
 
     with tab_predict:

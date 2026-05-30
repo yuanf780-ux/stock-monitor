@@ -87,20 +87,49 @@ def get_stocks_in_sector(df: pd.DataFrame, sector_name: str) -> pd.DataFrame:
     return df[df["sector_name"] == sector_name].copy()
 
 
-def fetch_sector_performance(sector_stocks: pd.DataFrame, top_n: int = 10) -> pd.DataFrame:
+PERIOD_MAP = {
+    "當日":    {"calendar_days": 3,   "label": "今日"},
+    "當周":    {"calendar_days": 7,   "label": "本週"},
+    "這兩週":  {"calendar_days": 14,  "label": "近兩週"},
+    "這一個月":{"calendar_days": 35,  "label": "近一個月"},
+    "這半年":  {"calendar_days": 195, "label": "近半年"},
+}
+
+
+def _period_start_end(period_key: str,
+                      custom_start=None, custom_end=None):
+    """回傳 (start_date, end_date, download_start)"""
+    end = datetime.today()
+    if period_key == "自訂" and custom_start and custom_end:
+        import datetime as _dt
+        start = datetime.combine(custom_start, datetime.min.time()) \
+                if hasattr(custom_start, "year") else datetime.today() - timedelta(days=30)
+        end   = datetime.combine(custom_end,   datetime.min.time()) \
+                if hasattr(custom_end,   "year") else datetime.today()
+    else:
+        cfg   = PERIOD_MAP.get(period_key, PERIOD_MAP["當周"])
+        start = end - timedelta(days=cfg["calendar_days"])
+
+    # 下載時多抓 5 天緩衝（跳過假日）
+    dl_start = start - timedelta(days=5)
+    return start, end, dl_start
+
+
+def fetch_sector_performance(sector_stocks: pd.DataFrame, top_n: int = 10,
+                             period_key: str = "當周",
+                             custom_start=None, custom_end=None) -> pd.DataFrame:
     """
-    Fetch recent price data for top_n stocks in a sector and calculate returns.
-    Returns a DataFrame with price info per stock.
+    Fetch price data for top_n stocks in a sector and calculate returns
+    for the given period.
     """
     tickers = sector_stocks["ticker"].head(top_n).tolist()
     if not tickers:
         return pd.DataFrame()
 
     try:
-        end   = datetime.today()
-        start = end - timedelta(days=40)
-        raw   = yf.download(tickers, start=start, end=end, auto_adjust=True, progress=False)
-
+        start, end, dl_start = _period_start_end(period_key, custom_start, custom_end)
+        raw = yf.download(tickers, start=dl_start, end=end,
+                          auto_adjust=True, progress=False)
         if raw.empty:
             return pd.DataFrame()
 
@@ -113,28 +142,27 @@ def fetch_sector_performance(sector_stocks: pd.DataFrame, top_n: int = 10) -> pd
         if close.empty:
             return pd.DataFrame()
 
-        latest    = close.iloc[-1]
-        w1_ago    = close.iloc[-6]  if len(close) >= 6  else close.iloc[0]
-        m1_ago    = close.iloc[-21] if len(close) >= 21 else close.iloc[0]
+        latest = close.iloc[-1]
+        # 找距 start 最近的收盤日
+        start_ts = pd.Timestamp(start)
+        before   = close[close.index <= start_ts]
+        base     = before.iloc[-1] if not before.empty else close.iloc[0]
 
         rows = []
         for t in tickers:
             if t not in close.columns:
                 continue
-            p = latest.get(t)
-            p1w = w1_ago.get(t)
-            p1m = m1_ago.get(t)
+            p  = latest.get(t)
+            pb = base.get(t)
             if pd.isna(p):
                 continue
-            r1w = (p / p1w - 1) * 100 if p1w and not pd.isna(p1w) else None
-            r1m = (p / p1m - 1) * 100 if p1m and not pd.isna(p1m) else None
+            ret = (p / pb - 1) * 100 if pb and not pd.isna(pb) else None
             short = sector_stocks.loc[sector_stocks["ticker"] == t, "short_name"]
             rows.append({
-                "ticker":    t,
-                "name":      short.values[0] if len(short) else t,
-                "price":     round(p, 2),
-                "ret_1w":    round(r1w, 2) if r1w is not None else None,
-                "ret_1m":    round(r1m, 2) if r1m is not None else None,
+                "ticker": t,
+                "name":   short.values[0] if len(short) else t,
+                "price":  round(p, 2),
+                "ret":    round(ret, 2) if ret is not None else None,
             })
 
         return pd.DataFrame(rows)
@@ -142,10 +170,11 @@ def fetch_sector_performance(sector_stocks: pd.DataFrame, top_n: int = 10) -> pd
         return pd.DataFrame()
 
 
-def compute_all_sector_perf(df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
+def compute_all_sector_perf(df: pd.DataFrame, top_n: int = 5,
+                            period_key: str = "當周",
+                            custom_start=None, custom_end=None) -> pd.DataFrame:
     """
-    Compute 1-week return per sector using top_n representative stocks.
-    Used for the sector heatmap / ranking overview.
+    Compute return per sector for the given period using top_n representative stocks.
     """
     results = []
     major_sectors = [c for c in SECTOR_NAME_MAP if c != "91"]
@@ -166,10 +195,9 @@ def compute_all_sector_perf(df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
         return pd.DataFrame()
 
     try:
-        end   = datetime.today()
-        start = end - timedelta(days=35)
-        raw   = yf.download(list(set(all_tickers)), start=start, end=end,
-                            auto_adjust=True, progress=False)
+        start, end, dl_start = _period_start_end(period_key, custom_start, custom_end)
+        raw = yf.download(list(set(all_tickers)), start=dl_start, end=end,
+                          auto_adjust=True, progress=False)
         if raw.empty:
             return pd.DataFrame()
 
@@ -179,27 +207,27 @@ def compute_all_sector_perf(df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
             close = raw["Close"] if "Close" in raw.columns else raw.xs("Close", axis=1, level=0)
 
         close = close.dropna(how="all")
-        latest = close.iloc[-1]
-        w1_ago = close.iloc[-6] if len(close) >= 6 else close.iloc[0]
-        m1_ago = close.iloc[-21] if len(close) >= 21 else close.iloc[0]
+        latest   = close.iloc[-1]
+        start_ts = pd.Timestamp(start)
+        before   = close[close.index <= start_ts]
+        base_row = before.iloc[-1] if not before.empty else close.iloc[0]
 
         for name, tickers in sector_ticker_map.items():
-            ret1w_list, ret1m_list = [], []
+            ret_list = []
             for t in tickers:
                 if t not in close.columns:
                     continue
-                p, p1w, p1m = latest.get(t), w1_ago.get(t), m1_ago.get(t)
-                if not pd.isna(p) and not pd.isna(p1w) and p1w:
-                    ret1w_list.append((p / p1w - 1) * 100)
-                if not pd.isna(p) and not pd.isna(p1m) and p1m:
-                    ret1m_list.append((p / p1m - 1) * 100)
+                p  = latest.get(t)
+                pb = base_row.get(t)
+                if not pd.isna(p) and not pd.isna(pb) and pb:
+                    ret_list.append((p / pb - 1) * 100)
 
-            if ret1w_list:
+            if ret_list:
                 results.append({
                     "sector":   name,
-                    "ret_1w":   round(sum(ret1w_list) / len(ret1w_list), 2),
-                    "ret_1m":   round(sum(ret1m_list) / len(ret1m_list), 2) if ret1m_list else None,
-                    "n_stocks": len(ret1w_list),
+                    "ret_1w":   round(sum(ret_list) / len(ret_list), 2),  # 保持欄位名稱向後相容
+                    "ret_1m":   None,
+                    "n_stocks": len(ret_list),
                 })
 
         result_df = pd.DataFrame(results).sort_values("ret_1w", ascending=False).reset_index(drop=True)
