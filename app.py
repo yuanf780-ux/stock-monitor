@@ -22,76 +22,103 @@ st.set_page_config(
     page_title="股票監控系統",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",   # 手機自動收合
 )
 
 st.markdown("""<style>
-/* ── 台股卡片：藍色邊框 ── */
-.card-tw {
-    background: #0f1e3a;
-    border-left: 4px solid #3b82f6;
-    border-radius: 10px;
-    padding: 12px 14px;
-    margin-bottom: 8px;
-}
-/* ── 美股卡片：金色邊框 ── */
-.card-us {
-    background: #1c1200;
-    border-left: 4px solid #f59e0b;
-    border-radius: 10px;
-    padding: 12px 14px;
-    margin-bottom: 8px;
-}
-/* ── 通用卡片 ── */
-.card-base {
-    background: #16213e;
-    border-left: 4px solid #4f46e5;
-    border-radius: 10px;
-    padding: 12px 14px;
-    margin-bottom: 8px;
-}
-.stock-name  { font-size: 1em;   font-weight: 600; color: #f1f5f9; }
+/* ══ 基礎樣式 ══════════════════════════════════════════════════════ */
+.stock-name  { font-size: 1em;    font-weight: 600; color: #f1f5f9; }
 .stock-code  { font-size: 0.72em; color: #94a3b8; }
 .stock-price { font-size: 1.45em; font-weight: 700; color: #ffffff; }
-.stock-up    { color: #4ade80; font-weight: 600; }
-.stock-dn    { color: #f87171; font-weight: 600; }
-.stock-note  { font-size: 0.75em; color: #64748b; margin-top: 3px; }
-.signal-box  {
-    background: #1a1a2e;
-    border: 1px solid #374151;
-    border-radius: 8px;
-    padding: 14px 16px;
-    margin-top: 8px;
-    white-space: pre-wrap;
-    color: #e2e8f0;
-    font-size: 0.9em;
-    line-height: 1.6;
-}
 .theme-tag {
     display: inline-block;
-    background: #1e3a5f;
-    color: #93c5fd;
-    border-radius: 4px;
-    padding: 2px 7px;
-    font-size: 0.72em;
-    margin: 2px 2px 2px 0;
-    font-weight: 500;
+    background: #1e3a5f; color: #93c5fd;
+    border-radius: 4px; padding: 2px 7px;
+    font-size: 0.72em; margin: 2px 2px 2px 0; font-weight: 500;
 }
-.section-header {
-    font-size: 0.8em;
-    font-weight: 600;
-    color: #94a3b8;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    margin: 12px 0 6px 0;
+.signal-box {
+    background: #1a1a2e; border: 1px solid #374151;
+    border-radius: 8px; padding: 14px 16px;
+    margin-top: 8px; white-space: pre-wrap;
+    color: #e2e8f0; font-size: 0.9em; line-height: 1.6;
 }
-/* ── 手機版調整 ── */
+/* ══ 手機版全面優化 ════════════════════════════════════════════════ */
 @media (max-width: 768px) {
-    .block-container { padding: 0.5rem 0.5rem !important; }
-    .stock-price     { font-size: 1.2em !important; }
-    .stColumn        { padding: 2px !important; }
-    [data-testid="stSidebar"] { width: 240px !important; }
-    .stButton button { font-size: 0.8em; padding: 6px 10px; }
+    /* 縮小邊距，讓內容更寬 */
+    .block-container {
+        padding: 0.4rem 0.4rem 5rem 0.4rem !important;
+        max-width: 100% !important;
+    }
+    /* 所有欄位在手機變 2 欄（由 CSS 控制，不影響 Streamlit 邏輯） */
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+    [data-testid="column"] {
+        min-width: calc(50% - 6px) !important;
+        flex: 0 0 calc(50% - 6px) !important;
+    }
+    /* 3 欄的情況也變 2 欄 */
+    [data-testid="stHorizontalBlock"] > [data-testid="column"]:nth-child(odd):last-child {
+        min-width: 100% !important;
+    }
+    /* 字體放大，觸控友好 */
+    .stock-price { font-size: 1.3em !important; }
+    .stock-name  { font-size: 0.95em !important; }
+    /* 按鈕放大觸控區域 */
+    button, [data-testid="baseButton-secondary"],
+    [data-testid="baseButton-primary"] {
+        min-height: 44px !important;
+        font-size: 1em !important;
+        touch-action: manipulation;
+    }
+    /* 側邊欄在手機自動收起 */
+    [data-testid="stSidebar"] { width: 280px !important; }
+    /* radio 按鈕間距 */
+    [data-testid="stRadio"] label { padding: 6px 4px !important; font-size: 0.9em !important; }
+    /* selectbox */
+    [data-testid="stSelectbox"] select { font-size: 1em !important; }
+    /* 圖表全寬 */
+    .js-plotly-plot { max-width: 100vw !important; }
+    /* 頁面標題 */
+    h1 { font-size: 1.6em !important; }
+    h2 { font-size: 1.3em !important; }
+    h3 { font-size: 1.1em !important; }
+    /* 表格文字 */
+    [data-testid="stDataFrame"] { font-size: 0.85em !important; }
+}
+/* ══ 手機底部導覽列 ════════════════════════════════════════════════ */
+#mobile-nav {
+    display: none;
+}
+@media (max-width: 768px) {
+    #mobile-nav {
+        display: flex !important;
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: #1e293b;
+        border-top: 1px solid #334155;
+        z-index: 9999;
+        padding: 0;
+    }
+    #mobile-nav a {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 8px 2px;
+        color: #94a3b8;
+        text-decoration: none;
+        font-size: 0.65em;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        background: transparent;
+        min-height: 56px;
+    }
+    #mobile-nav a span.icon { font-size: 1.5em; line-height: 1; margin-bottom: 2px; }
+    #mobile-nav a.active { color: #3b82f6; }
 }
 </style>""", unsafe_allow_html=True)
 
@@ -397,7 +424,7 @@ def page_watchlist():
     with col_b:
         alert_pct = st.slider("警示門檻(%)", 1.0, 10.0, 3.0, 0.5)
     with col_c:
-        cols_n = st.select_slider("欄數", [2, 3, 4], value=4)
+        cols_n = st.select_slider("每排欄數", [2, 3, 4], value=2)
 
     items = list(watchlist)
     if sort_by == "漲幅高低":
@@ -1584,3 +1611,24 @@ elif p == "台美對照 & 供應鏈":
 
 st.divider()
 st.caption("⚠️ 本系統僅供技術分析參考，不構成任何投資建議。資料來源：Yahoo Finance / TWSE / TAIFEX。")
+
+# ── 手機底部導覽列（桌機版隱藏）────────────────────────────────────
+_cur = st.session_state.page
+_nav_items = [
+    ("即時大盤",        "📡", "即時大盤"),
+    ("自選股列表",      "⭐", "自選股"),
+    ("個股深度分析",    "🔬", "個股"),
+    ("外資籌碼追蹤",    "💰", "外資"),
+    ("美股信號 → 台股影響", "🔗", "美股"),
+    ("族群分析",        "🏭", "族群"),
+]
+_nav_html = '<nav id="mobile-nav">'
+for _page, _icon, _label in _nav_items:
+    _active = 'active' if _cur == _page else ''
+    _nav_html += (
+        f'<a class="{_active}" onclick="window.parent.document.querySelector'
+        f'(\'[data-testid=\"stRadio\"] input[value=\"{_page}\"]\')?.click()">'
+        f'<span class="icon">{_icon}</span>{_label}</a>'
+    )
+_nav_html += '</nav>'
+st.markdown(_nav_html, unsafe_allow_html=True)
