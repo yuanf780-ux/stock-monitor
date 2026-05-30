@@ -6,7 +6,8 @@ import time
 
 from config import DEFAULT_TW_STOCKS, DEFAULT_US_STOCKS, ALERT_DEFAULTS, INDICATOR_COLORS
 from data_fetcher import (fetch_stock_info, fetch_history, fetch_batch_prices,
-                          name_to_ticker, get_all_stock_options, option_to_ticker)
+                          name_to_ticker, get_all_stock_options, option_to_ticker,
+                          fetch_kline, KLINE_PRESETS)
 from indicators import compute_all, get_signals
 import ai_analyst
 import sector_data as sd
@@ -652,33 +653,35 @@ def page_detail():
         st.error(f"找不到 {ticker} 的資料，請確認代碼正確（台股要加 .TW，如 2330.TW）")
         return
 
-    # K 線區間選擇
-    period_options = ["3 個月", "6 個月", "1 年", "2 年", "自訂區間"]
-    period_map     = {"3 個月": "3mo", "6 個月": "6mo", "1 年": "1y", "2 年": "2y"}
-    period_label   = st.radio("K 線區間", period_options, index=1, horizontal=True)
+    # ── K 線粒度選擇器 ───────────────────────────────────────────────────
+    kline_keys = list(KLINE_PRESETS.keys())
+    default_ki = kline_keys.index("6個月") if "6個月" in kline_keys else 0
+    sel_kline  = st.selectbox(
+        "K 線粒度 / 區間",
+        kline_keys,
+        index=default_ki,
+        format_func=lambda k: KLINE_PRESETS[k]["label"],
+        key=f"kline_sel_{ticker}",
+        label_visibility="collapsed",
+    )
 
-    if period_label == "自訂區間":
-        import datetime as _dt
+    import datetime as _dt
+    custom_start = custom_end = None
+    if sel_kline == "自訂":
         col_d1, col_d2 = st.columns(2)
         with col_d1:
-            custom_start = st.date_input("開始日期",
+            custom_start = st.date_input("起始日",
                 value=_dt.date.today() - _dt.timedelta(days=365),
                 max_value=_dt.date.today() - _dt.timedelta(days=2))
         with col_d2:
-            custom_end = st.date_input("結束日期",
-                value=_dt.date.today(),
-                max_value=_dt.date.today())
-        try:
-            stock_obj = __import__("yfinance").Ticker(ticker)
-            df_h = stock_obj.history(start=str(custom_start), end=str(custom_end))
-            if not df_h.empty:
-                df_h.index = __import__("pandas").to_datetime(df_h.index).tz_localize(None)
-        except Exception:
-            df_h = fetch_history(ticker, period="1y")
-    else:
-        period = period_map[period_label]
-        if period != "6mo":
-            df_h = fetch_history(ticker, period=period)
+            custom_end = st.date_input("結束日",
+                value=_dt.date.today(), max_value=_dt.date.today())
+
+    with st.spinner("載入K線資料…"):
+        df_h = fetch_kline(ticker, sel_kline, custom_start, custom_end)
+    if df_h is None or df_h.empty:
+        # 降級到 6mo 日K
+        df_h = fetch_history(ticker, period="6mo")
 
     if not info.get("valid") or df_h is None or df_h.empty:
         st.error(f"找不到 {ticker} 的資料"); return
@@ -827,10 +830,25 @@ def page_detail():
                 line=dict(color="#f59e0b", width=1.5)), row=rr, col=1)
             fig.add_hline(y=70, line_dash="dot", line_color="#ef4444", opacity=0.4, row=rr, col=1)
             fig.add_hline(y=30, line_dash="dot", line_color="#22c55e", opacity=0.4, row=rr, col=1)
-        fig.update_layout(template="plotly_dark", height=650, showlegend=True,
-            legend=dict(orientation="h", y=1.02, x=1, xanchor="right"),
-            margin=dict(l=10,r=10,t=30,b=10), xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+        kline_label = KLINE_PRESETS.get(sel_kline, {}).get("label", "")
+        fig.update_layout(
+            template="plotly_dark", height=650, showlegend=True,
+            legend=dict(
+                orientation="h", y=1.02, x=1, xanchor="right",
+                itemclick=False,         # 禁止點擊 legend 切換顯示
+                itemdoubleclick=False,   # 禁止雙擊
+            ),
+            margin=dict(l=10,r=10,t=30,b=10),
+            xaxis_rangeslider_visible=False,
+            dragmode=False,              # 禁止拖曳縮放（防止圖表亂跑）
+            uirevision=ticker,           # 切換股票才重置視角，其他操作保持穩定
+            title=dict(text=kline_label, font=dict(size=12, color="#64748b"),
+                       x=0, xanchor="left"),
+        )
+        st.plotly_chart(fig, use_container_width=True,
+                        config={"displayModeBar": False,
+                                "scrollZoom": False,
+                                "doubleClick": False})
 
         if "macd" in df.columns:
             with st.expander("MACD 指標"):

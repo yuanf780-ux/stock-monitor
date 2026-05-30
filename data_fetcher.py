@@ -340,3 +340,55 @@ def fetch_batch_prices(tickers: list) -> Dict[str, Dict]:
                          "pct": r["change_pct"], "valid": True}
 
     return result
+
+
+# ── K 線粒度設定（供 page_detail 使用）────────────────────────────────
+KLINE_PRESETS: dict = {
+    "1分K":    {"interval": "1m",   "days": 1,    "label": "1分K（近1天）"},
+    "5分K":    {"interval": "5m",   "days": 5,    "label": "5分K（近5天）"},
+    "30分K":   {"interval": "30m",  "days": 30,   "label": "30分K（近30天）"},
+    "1小時K":  {"interval": "60m",  "days": 60,   "label": "1小時K（近60天）"},
+    "5日":     {"interval": "1d",   "days": 5,    "label": "日K（近5日）"},
+    "20日":    {"interval": "1d",   "days": 20,   "label": "日K（近20日）"},
+    "1週":     {"interval": "1d",   "days": 7,    "label": "日K（近1週）"},
+    "2週":     {"interval": "1d",   "days": 14,   "label": "日K（近2週）"},
+    "3週":     {"interval": "1d",   "days": 21,   "label": "日K（近3週）"},
+    "4週":     {"interval": "1d",   "days": 28,   "label": "日K（近4週）"},
+    "1個月":   {"interval": "1d",   "period": "1mo",  "label": "日K（近1個月）"},
+    "3個月":   {"interval": "1d",   "period": "3mo",  "label": "日K（近3個月）"},
+    "6個月":   {"interval": "1d",   "period": "6mo",  "label": "日K（近6個月）"},
+    "1年":     {"interval": "1d",   "period": "1y",   "label": "日K（近1年）"},
+    "自訂":    {"interval": "1d",   "period": "custom","label": "自訂區間"},
+}
+
+
+def fetch_kline(ticker: str, preset_key: str,
+                custom_start=None, custom_end=None) -> Optional[pd.DataFrame]:
+    """
+    根據 KLINE_PRESETS 的設定抓取 K 線資料。
+    """
+    from datetime import datetime, timedelta
+    preset = KLINE_PRESETS.get(preset_key, KLINE_PRESETS["6個月"])
+    interval = preset["interval"]
+
+    try:
+        stock = yf.Ticker(ticker)
+
+        if preset.get("period") == "custom" and custom_start and custom_end:
+            df = stock.history(start=str(custom_start), end=str(custom_end),
+                               interval=interval)
+        elif "days" in preset:
+            end   = datetime.today()
+            start = end - timedelta(days=preset["days"])
+            df = stock.history(start=start.strftime("%Y-%m-%d"),
+                               end=end.strftime("%Y-%m-%d"),
+                               interval=interval)
+        else:
+            df = stock.history(period=preset["period"], interval=interval)
+
+        if df.empty:
+            return None
+        df.index = pd.to_datetime(df.index).tz_localize(None)
+        return df
+    except Exception:
+        return None
