@@ -125,44 +125,7 @@ st.markdown("""<style>
 }
 </style>""", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════
-# ── 密碼保護（必須輸入正確密碼才能使用）─────────────────────────────────
-# ══════════════════════════════════════════════════════════════════════════
-def _check_password() -> bool:
-    """回傳 True 代表已通過驗證"""
-    # 從 secrets 或環境變數取密碼
-    try:
-        correct_pw = st.secrets.get("APP_PASSWORD", "")
-    except Exception:
-        correct_pw = ""
-    if not correct_pw:
-        # 沒設密碼 → 直接放行
-        return True
-    if st.session_state.get("_authenticated"):
-        return True
-    # 顯示登入畫面
-    st.markdown("""
-    <div style="max-width:420px;margin:80px auto;background:#1e293b;border-radius:14px;
-                padding:36px 32px;text-align:center">
-        <div style="font-size:2.2em;margin-bottom:8px">📈</div>
-        <div style="font-size:1.4em;font-weight:700;color:#f1f5f9;margin-bottom:4px">股票監控系統</div>
-        <div style="color:#64748b;font-size:0.9em;margin-bottom:24px">請輸入授權密碼</div>
-    </div>
-    """, unsafe_allow_html=True)
-    col = st.columns([1, 2, 1])[1]
-    with col:
-        pw = st.text_input("密碼", type="password", label_visibility="collapsed",
-                           placeholder="輸入密碼…")
-        if st.button("進入", use_container_width=True, type="primary"):
-            if pw == correct_pw:
-                st.session_state["_authenticated"] = True
-                st.rerun()
-            else:
-                st.error("密碼錯誤，請重試。")
-    st.stop()
-    return False
-
-_check_password()
+# 開放給所有人使用（無密碼）
 
 # ── Session State ──────────────────────────────────────────────────────────
 if "watchlist" not in st.session_state:
@@ -205,7 +168,8 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.markdown("**快速搜尋個股**")
+    st.markdown("**搜尋個股**")
+
     @st.cache_data(ttl=3600)
     def _stock_options():
         return ["— 輸入名稱或代碼搜尋 —"] + get_all_stock_options()
@@ -222,41 +186,31 @@ with st.sidebar:
             st.rerun()
 
     st.divider()
-    st.markdown("**自選股管理**")
-    new_ticker = st.text_input("新增代碼", placeholder="2330.TW 或 AAPL",
-                               key="add_ticker", label_visibility="collapsed")
-    new_name = st.text_input("名稱（選填）", placeholder="台積電",
-                             key="add_name", label_visibility="collapsed")
-    if st.button("加入自選股", use_container_width=True):
-        t = new_ticker.strip().upper()
-        n = new_name.strip() or t
-        if t and not any(w["ticker"] == t for w in st.session_state.watchlist):
-            st.session_state.watchlist.append({"ticker": t, "name": n})
-            st.success(f"已加入 {n}")
-        elif t:
-            st.warning("已在清單中")
+    st.markdown("**自選股（本次瀏覽有效）**")
+    st.caption("關閉瀏覽器後自動重置")
 
-    st.session_state.pending_remove = st.multiselect(
-        "移除股票",
-        options=[w["ticker"] for w in st.session_state.watchlist],
-        default=[t for t in st.session_state.pending_remove
-                 if any(w["ticker"] == t for w in st.session_state.watchlist)],
-        format_func=lambda t: next(
-            (w["name"] for w in st.session_state.watchlist if w["ticker"] == t), t),
-        key="remove_ms",
-    )
-    if st.session_state.pending_remove:
-        if st.button("🗑️ 確認刪除", use_container_width=True, type="secondary"):
-            st.session_state.watchlist = [
-                w for w in st.session_state.watchlist
-                if w["ticker"] not in st.session_state.pending_remove
-            ]
-            st.session_state.pending_remove = []
+    with st.form("add_form", clear_on_submit=True):
+        add_sel = st.selectbox("新增股票", ["— 選擇股票 —"] + get_all_stock_options(),
+                               label_visibility="collapsed", key="add_sel_sb")
+        if st.form_submit_button("加入", use_container_width=True):
+            if add_sel and add_sel != "— 選擇股票 —":
+                t, n = option_to_ticker(add_sel)
+                if not any(w["ticker"] == t for w in st.session_state.watchlist):
+                    st.session_state.watchlist.append({"ticker": t, "name": n})
+                    st.rerun()
+
+    if len(st.session_state.watchlist) > len([*DEFAULT_TW_STOCKS, *DEFAULT_US_STOCKS]):
+        rm = st.selectbox("移除股票", ["— 選擇要移除的 —"] +
+                          [f'{w["name"]} ({w["ticker"]})' for w in st.session_state.watchlist],
+                          label_visibility="collapsed", key="rm_sel")
+        if rm and rm != "— 選擇要移除的 —" and st.button("移除", use_container_width=True):
+            tk = rm.split("(")[-1].replace(")", "").strip()
+            st.session_state.watchlist = [w for w in st.session_state.watchlist if w["ticker"] != tk]
             st.rerun()
 
     st.divider()
-    st.caption(f"最後更新 {pd.Timestamp.now().strftime('%H:%M:%S')}")
-    if st.button("🔄 手動刷新", use_container_width=True):
+    st.caption(f"資料更新：{pd.Timestamp.now().strftime('%H:%M:%S')}")
+    if st.button("刷新資料", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
@@ -554,22 +508,23 @@ def page_market():
 # ══════════════════════════════════════════════════════════════════════════
 def page_watchlist():
     st.title("自選股列表")
+    st.caption("本頁股票為本次瀏覽暫存，關閉瀏覽器後恢復預設。左側可新增或移除。")
 
     watchlist = st.session_state.watchlist
     if not watchlist:
-        st.info("請在左側新增自選股。"); return
+        st.info("尚無追蹤股票，請在左側新增。"); return
 
     tickers = [w["ticker"] for w in watchlist]
     with st.spinner("載入報價…"):
         prices = _batch_prices(tuple(tickers))
 
-    col_a, col_b, col_c = st.columns([2, 2, 1])
+    col_a, col_b = st.columns([2, 1])
     with col_a:
         sort_by = st.radio("排序", ["自訂順序", "漲幅高低", "跌幅高低"], horizontal=True)
     with col_b:
-        alert_pct = st.slider("警示門檻(%)", 1.0, 10.0, 3.0, 0.5)
-    with col_c:
-        cols_n = st.select_slider("每排欄數", [2, 3, 4], value=2)
+        cols_n = st.select_slider("欄數", [2, 3, 4], value=2)
+
+    alert_pct = 3.0
 
     items = list(watchlist)
     if sort_by == "漲幅高低":
