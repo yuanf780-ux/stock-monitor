@@ -45,13 +45,24 @@ def _build_prediction_prompt(perf_df: pd.DataFrame) -> str:
 注意：以上僅為技術與趨勢分析，不構成投資建議。"""
 
 
+def _get_api_key():
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not key:
+        try:
+            import streamlit as st
+            key = st.secrets.get("ANTHROPIC_API_KEY", "")
+        except Exception:
+            pass
+    return key
+
+
 def predict_hot_sectors(perf_df: pd.DataFrame) -> str:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = _get_api_key()
     if not api_key:
-        return "⚠️ 請設定 ANTHROPIC_API_KEY 環境變數以啟用 AI 族群預測功能。"
+        return "⚠️ 請設定 ANTHROPIC_API_KEY 才能使用 AI 族群預測。"
 
     if perf_df.empty:
-        return "❌ 無族群績效資料，無法進行預測。"
+        return "❌ 無族群績效資料，請先載入族群排行。"
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -63,6 +74,17 @@ def predict_hot_sectors(perf_df: pd.DataFrame) -> str:
         )
         return msg.content[0].text
     except anthropic.AuthenticationError:
-        return "❌ ANTHROPIC_API_KEY 無效，請重新確認。"
+        return "❌ API Key 無效，請到 Manage app → Secrets 重新確認。"
     except Exception as e:
-        return f"❌ AI 預測失敗：{e}"
+        err = str(e)
+        if "credit" in err.lower() or "balance" in err.lower() or "billing" in err.lower():
+            return (
+                "💳 **Anthropic API 額度不足**\n\n"
+                "你的帳戶餘額為零，需要先充值才能使用 AI 功能。\n\n"
+                "**充值步驟：**\n"
+                "1. 前往 https://console.anthropic.com/settings/billing\n"
+                "2. 點「Add credits」\n"
+                "3. 充值最低 5 美元即可使用\n\n"
+                "充值完成後，重新點「產生族群預測」按鈕。"
+            )
+        return f"❌ AI 預測失敗：{err[:100]}"

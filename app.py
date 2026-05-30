@@ -368,7 +368,8 @@ def page_market():
             fig_cmp.update_layout(template="plotly_dark", height=260,
                 margin=dict(l=10,r=10,t=10,b=10), xaxis_visible=False,
                 yaxis_title="vs 開盤(%)", legend=dict(orientation="h"))
-            st.plotly_chart(fig_cmp, use_container_width=True)
+            st.plotly_chart(fig_cmp, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
         st.divider()
         st.markdown("#### 🇹🇼 台股指數 & 台指期")
@@ -404,7 +405,8 @@ def page_market():
             fig_tw.update_layout(template="plotly_dark", height=200,
                 margin=dict(l=10,r=10,t=10,b=10), xaxis=dict(tickformat="%H:%M"),
                 showlegend=False)
-            st.plotly_chart(fig_tw, use_container_width=True)
+            st.plotly_chart(fig_tw, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
         if txd.get("valid") and tw.get("valid"):
             spread = txd["price"] - tw["price"]
@@ -867,7 +869,8 @@ def page_detail():
                 fm.add_trace(go.Bar(x=df.index, y=df["macd_hist"], marker_color=hc, opacity=0.7, name="Hist"))
                 fm.update_layout(template="plotly_dark", height=220,
                     margin=dict(l=10,r=10,t=10,b=10), legend=dict(orientation="h"))
-                st.plotly_chart(fm, use_container_width=True)
+                st.plotly_chart(fm, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
     # ── Institutional Tab ──────────────────────────────────────────────────
     with dtab2:
@@ -938,7 +941,8 @@ def page_detail():
                 fig_inst.update_layout(template="plotly_dark", height=280, barmode="group",
                     margin=dict(l=10,r=10,t=10,b=10),
                     yaxis_title="千張", legend=dict(orientation="h"))
-                st.plotly_chart(fig_inst, use_container_width=True)
+                st.plotly_chart(fig_inst, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
                 # Table
                 display = inst_df[["date_str","fi_net","it_net","dl_net","total_net"]].copy()
@@ -1196,7 +1200,8 @@ def page_institutional():
             margin=dict(l=10, r=80, t=40, b=20),
             xaxis_title="千張（千股）",
             yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
         # 明細表
         show = d[["code","name","fi_cum","it_cum","total_cum","fi_consec"]].copy()
@@ -1240,7 +1245,8 @@ def page_institutional():
                     height=max(250, len(buy_consec)*24),
                     margin=dict(l=10,r=60,t=10,b=20),
                     xaxis_title="天", yaxis=dict(autorange="reversed"))
-                st.plotly_chart(fig_bc, use_container_width=True)
+                st.plotly_chart(fig_bc, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
         with c2:
             st.markdown("**連續賣超最多天（外資）**")
             sell_consec = cum_df[cum_df["fi_consec"] < 0].nsmallest(15, "fi_consec")
@@ -1255,7 +1261,8 @@ def page_institutional():
                     height=max(250, len(sell_consec)*24),
                     margin=dict(l=10,r=60,t=10,b=20),
                     xaxis_title="天", yaxis=dict(autorange="reversed"))
-                st.plotly_chart(fig_sc, use_container_width=True)
+                st.plotly_chart(fig_sc, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
     with tab_all:
         st.markdown("#### 📋 全部股票三大法人明細")
@@ -1344,7 +1351,8 @@ def page_sector():
                 title=f"各族群漲跌幅排行（{saved_label}）",
                 margin=dict(l=10, r=80, t=40, b=20),
                 xaxis_title="漲跌幅 (%)")
-            st.plotly_chart(fig_hm, use_container_width=True)
+            st.plotly_chart(fig_hm, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
             display = perf_df.copy()
             display["排名"] = range(1, len(display)+1)
@@ -1387,7 +1395,8 @@ def page_sector():
                     height=max(280, len(perf_s)*28),
                     margin=dict(l=10, r=70, t=10, b=20),
                     xaxis_title=f"{period_label}漲跌%")
-                st.plotly_chart(fig_s, use_container_width=True)
+                st.plotly_chart(fig_s, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
                 add_sel = st.multiselect("加入自選股",
                     options=perf["ticker"].tolist(),
@@ -1571,9 +1580,13 @@ def page_us_signal():
         xaxis_title="漲跌幅 (%)",
         title="美股關鍵股票今日漲跌  ·  含題材分類",
         font=dict(size=12),
+        dragmode=False,
+        legend=dict(itemclick=False, itemdoubleclick=False),
     )
     with st.expander("美股漲跌總覽圖（含題材）", expanded=True):
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True,
+                        config={"displayModeBar": False, "scrollZoom": False,
+                                "doubleClick": False})
 
     # ── 主題篩選 ──────────────────────────────────────────────────────
     st.divider()

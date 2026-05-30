@@ -321,4 +321,6 @@ def ai_news_briefing(news_list: List[Dict], us_movers: List[Dict],
         )
         return msg.content[0].text
     except Exception as e:
+        if "credit" in str(e).lower() or "balance" in str(e).lower():
+            return "💳 Anthropic 額度不足，請到 https://console.anthropic.com/settings/billing 充值（最低 $5）後再試。"
         return f"AI 分析暫時無法使用：{e}"

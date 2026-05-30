@@ -58,4 +58,6 @@ def analyze(ticker: str, name: str, info: dict, df: pd.DataFrame, signals: dict)
     except anthropic.AuthenticationError:
         return "❌ ANTHROPIC_API_KEY 無效，請重新確認。"
     except Exception as e:
+        if "credit" in str(e).lower() or "balance" in str(e).lower():
+            return "💳 Anthropic 額度不足，請到 https://console.anthropic.com/settings/billing 充值（最低 $5）後再試。"
         return f"❌ AI 分析失敗：{e}"
