@@ -45,13 +45,30 @@ def _parse_news_item(raw: dict, sym: str) -> dict:
         url       = raw.get("link", "")
         publisher = raw.get("publisher", "")
 
+    # 轉換成台灣時間和美東時間
+    time_tw = time_us = ""
     try:
-        pub_str = datetime.fromtimestamp(pub_ts, tz=timezone.utc).strftime("%m/%d %H:%M") if pub_ts else ""
+        if pub_ts:
+            from datetime import timedelta
+            dt_utc = datetime.fromtimestamp(pub_ts, tz=timezone.utc)
+
+            # 台灣 UTC+8
+            dt_tw = dt_utc + timedelta(hours=8)
+            time_tw = dt_tw.strftime("%m/%d %H:%M")
+
+            # 美東：3月第2週日 - 11月第1週日 為 EDT(UTC-4)，其餘 EST(UTC-5)
+            month = dt_utc.month
+            is_edt = 3 <= month <= 11  # 簡化判斷
+            offset = -4 if is_edt else -5
+            tz_label = "EDT" if is_edt else "EST"
+            dt_us = dt_utc + timedelta(hours=offset)
+            time_us = dt_us.strftime("%m/%d %H:%M") + f" {tz_label}"
     except Exception:
-        pub_str = ""
+        pass
 
     return {"title": title, "publisher": publisher, "url": url,
-            "time": pub_str, "ticker": sym, "ts": pub_ts}
+            "time": time_tw, "time_us": time_us,
+            "ticker": sym, "ts": pub_ts}
 
 
 def _fetch_one(sym: str, max_n: int, seen: set) -> List[Dict]:
