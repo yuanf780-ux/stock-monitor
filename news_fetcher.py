@@ -9,8 +9,12 @@ from datetime import datetime, timezone
 from typing import List, Dict
 
 
-# ── 關鍵股票新聞追蹤清單（精簡到 6 支最重要的）────────────────────
-NEWS_TICKERS = ["NVDA", "AAPL", "TSLA", "MU", "MSFT", "AMD"]
+# ── 關鍵股票新聞追蹤清單（12 支，覆蓋主要題材）────────────────────
+NEWS_TICKERS = [
+    "NVDA", "AAPL", "TSLA", "MU",    # AI/半導體/記憶體/EV
+    "MSFT", "AMD", "AVGO", "QCOM",   # AI雲端/CPU/網路晶片/手機
+    "SMCI", "META", "GOOGL", "AMZN", # AI Server/雲端大廠
+]
 
 
 def _parse_news_item(raw: dict, sym: str) -> dict:
@@ -107,7 +111,7 @@ def fetch_stock_news(tickers: List[str] = None, max_per_ticker: int = 3) -> List
                 pass
 
     all_news.sort(key=lambda x: x["ts"], reverse=True)
-    return all_news[:20]
+    return all_news[:40]
 
 
 # ── 新聞關鍵字 → 產業影響對照表 ──────────────────────────────────────
@@ -387,7 +391,7 @@ def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
 
         # 建立新聞清單 + 各則已知的相關台股（作為多空參考）
         items_str_parts = []
-        for i, n in enumerate(news_list[:12]):
+        for i, n in enumerate(news_list[:25]):
             impact = tag_news_impact(n["title"])
             tw_ref = "、".join(name for _, name in impact.get("tw_stocks", [])[:4])
             items_str_parts.append(
@@ -398,7 +402,7 @@ def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
 
         # 只要中文標題一行，乾淨不分析
         titles_only = "\n".join(
-            f"{i+1}. {n['title']}" for i, n in enumerate(news_list[:15])
+            f"{i+1}. {n['title']}" for i, n in enumerate(news_list[:25])
         )
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
