@@ -139,7 +139,6 @@ def goto_detail(ticker: str, name: str = ""):
     st.session_state.detail_ticker = ticker
     st.session_state.detail_name   = name
     st.session_state.page          = "個股深度分析"
-    st.session_state["nav_radio"]  = "個股深度分析"
     st.rerun()
 
 
@@ -158,8 +157,12 @@ with st.sidebar:
         "族群分析",
         "台美對照 & 供應鏈",
     ]
-    page = st.radio("頁面", _pages, key="nav_radio")
-    st.session_state.page = page
+    # 不用 key，讓 index 每次都生效（避免 StreamlitAPIException）
+    _cur_idx = _pages.index(st.session_state.page) if st.session_state.page in _pages else 0
+    page = st.radio("頁面", _pages, index=_cur_idx)
+    if page != st.session_state.page:
+        st.session_state.page = page
+        st.rerun()
 
     st.divider()
     st.markdown("**快速搜尋個股**")
