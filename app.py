@@ -415,7 +415,14 @@ def page_watchlist():
             mkt_tag = '<span style="background:#1e3a5f;color:#93c5fd;border-radius:3px;padding:1px 5px;font-size:0.65em">台股</span>' if is_tw else \
                       '<span style="background:#3b1500;color:#fcd34d;border-radius:3px;padding:1px 5px;font-size:0.65em">美股</span>'
             themes  = sc.get_themes(ticker)
+            # 最多顯示 2 個題材標籤
             theme_html = "".join(f'<span class="theme-tag">{t}</span>' for t in themes[:2])
+            # 美股額外從 US_TW_IMPACT 抓題材
+            if not themes and not is_tw:
+                us_imp = uti.US_TW_IMPACT.get(ticker, {})
+                us_theme = us_imp.get("theme", "")
+                if us_theme:
+                    theme_html = f'<span class="theme-tag">{us_theme.split("/")[0][:14]}</span>'
             if abs(pct) >= alert_pct and p:
                 alerts.append(f"注意  **{stock['name']}**  {pct:+.2f}%")
             with col:
@@ -1274,24 +1281,46 @@ def page_us_signal():
     gainers = [m for m in movers if m["pct"] >= 0]
     losers  = [m for m in movers if m["pct"] < 0][::-1]
 
-    # 漲跌幅總覽橫條圖
+    # ── 漲跌幅總覽橫條圖（含題材標籤）──────────────────────────────────
     all_sorted = sorted(movers, key=lambda x: x["pct"])
     bar_colors = ["#22c55e" if m["pct"] >= 0 else "#ef4444" for m in all_sorted]
+
+    # Y 軸標籤：股票名稱 + 題材縮寫
+    def _short_theme(t: str) -> str:
+        # 取題材第一段（斜線前）並限制長度
+        return t.split("/")[0].split("（")[0][:10] if t else ""
+
+    y_labels = [
+        f"{m['name']} ({m['sym']})  ·  {_short_theme(m['theme'])}"
+        for m in all_sorted
+    ]
+    hover_texts = [
+        f"<b>{m['name']} ({m['sym']})</b><br>"
+        f"題材：{m['theme']}<br>"
+        f"今日：{m['price']:,.2f}  {m['pct']:+.2f}%<br>"
+        f"漲跌：{m['change']:+.2f}"
+        for m in all_sorted
+    ]
+
     fig_bar = go.Figure(go.Bar(
         x=[m["pct"] for m in all_sorted],
-        y=[f"{m['name']}({m['sym']})" for m in all_sorted],
+        y=y_labels,
         orientation="h",
         marker_color=bar_colors,
         text=[f"{m['pct']:+.2f}%" for m in all_sorted],
         textposition="outside",
+        hovertext=hover_texts,
+        hoverinfo="text",
     ))
     fig_bar.update_layout(
-        template="plotly_dark", height=max(300, len(all_sorted)*22),
-        margin=dict(l=10, r=80, t=30, b=10),
+        template="plotly_dark",
+        height=max(350, len(all_sorted) * 28),
+        margin=dict(l=10, r=90, t=40, b=10),
         xaxis_title="漲跌幅 (%)",
-        title="美股關鍵股票今日漲跌一覽",
+        title="美股關鍵股票今日漲跌  ·  含題材分類",
+        font=dict(size=12),
     )
-    with st.expander("📊 美股漲跌總覽圖", expanded=True):
+    with st.expander("美股漲跌總覽圖（含題材）", expanded=True):
         st.plotly_chart(fig_bar, use_container_width=True)
 
     # ── 主題篩選 ──────────────────────────────────────────────────────
@@ -1334,27 +1363,52 @@ def page_us_signal():
         pct    = m["pct"]
         color  = "#22c55e" if pct >= 0 else "#ef4444"
         arrow  = "▲" if pct >= 0 else "▼"
-        signal = "📈 利多信號" if pct >= 0 else "📉 利空信號"
-        intensity = "🔥🔥🔥" if abs(pct) >= 5 else "🔥🔥" if abs(pct) >= 2 else "🔥"
+        itype  = impact.get("impact_type", "連動")
+        theme  = impact.get("theme", "")
+        reason = impact.get("reason", "")
 
-        # US stock header
+        # 信號強度
+        if abs(pct) >= 5:
+            sig_label = "強力信號"
+            sig_color = "#fbbf24"
+        elif abs(pct) >= 2:
+            sig_label = "中等信號"
+            sig_color = "#f59e0b"
+        else:
+            sig_label = "輕微信號"
+            sig_color = "#94a3b8"
+
+        direction = "漲" if pct >= 0 else "跌"
+
+        # US stock header — 更清楚的題材顯示
         st.markdown(
-            f'<div style="background:#1e293b;border-radius:10px;padding:12px 16px;'
-            f'border-left:5px solid {color};margin-bottom:4px;">'
+            f'<div style="background:#1e293b;border-radius:10px;padding:14px 16px;'
+            f'border-left:5px solid {color};margin-bottom:6px;">'
+            # 第一行：國旗 + 代碼 + 題材標籤 + 信號強度
+            f'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">'
+            f'  <span style="color:#9ca3af;font-size:0.8em">美股</span>'
+            f'  <span style="color:#ffffff;font-weight:700;font-size:1em">{sym}</span>'
+            f'  <span style="background:#0f2a4a;color:#93c5fd;border-radius:4px;'
+            f'    padding:2px 10px;font-size:0.78em;font-weight:600">{theme}</span>'
+            f'  <span style="background:{sig_color}22;color:{sig_color};border-radius:4px;'
+            f'    padding:2px 8px;font-size:0.75em;font-weight:600">{sig_label}</span>'
+            f'</div>'
+            # 第二行：名稱 + 價格
             f'<div style="display:flex;justify-content:space-between;align-items:center;">'
-            f'<div>'
-            f'  <span style="font-size:0.8em;color:#9ca3af">🇺🇸 {sym}</span><br>'
-            f'  <span style="font-size:1.1em;font-weight:bold;color:#fff">{m["name"]}</span>'
-            f'  <span style="margin-left:8px;background:#1e3a5f;color:#93c5fd;'
-            f'  border-radius:4px;padding:2px 8px;font-size:0.78em">{impact.get("theme","")}</span>'
+            f'  <span style="font-size:1.15em;font-weight:700;color:#f1f5f9">{m["name"]}</span>'
+            f'  <div style="text-align:right;">'
+            f'    <div style="font-size:1.5em;font-weight:800;color:#fff">{m["price"]:,.2f}</div>'
+            f'    <div style="color:{color};font-weight:700">{arrow} {m["change"]:+.2f} ({pct:+.2f}%)</div>'
+            f'  </div>'
             f'</div>'
-            f'<div style="text-align:right;">'
-            f'  <div style="font-size:1.4em;font-weight:bold;color:#fff">{m["price"]:,.2f}</div>'
-            f'  <div style="color:{color};font-weight:bold">{arrow} {m["change"]:+.2f} ({pct:+.2f}%) {intensity}</div>'
+            # 第三行：連動類型 + 原因
+            f'<div style="margin-top:8px;padding-top:8px;border-top:1px solid #374151;">'
+            f'  <span style="background:#1f2937;color:#6ee7b7;border-radius:3px;'
+            f'    padding:1px 7px;font-size:0.72em;font-weight:600;margin-right:6px">{itype}</span>'
+            f'  <span style="color:#94a3b8;font-size:0.8em">{reason[:60]}{"..." if len(reason)>60 else ""}</span>'
             f'</div>'
-            f'</div>'
-            f'<div style="margin-top:6px;color:#94a3b8;font-size:0.82em">'
-            f'  {signal} · {impact.get("impact_type","連動")} · {impact.get("reason","")}'
+            f'<div style="margin-top:4px;color:#64748b;font-size:0.76em">'
+            f'  {sym} {direction}{abs(pct):.1f}%，影響以下台股題材 →'
             f'</div>'
             f'</div>',
             unsafe_allow_html=True,
