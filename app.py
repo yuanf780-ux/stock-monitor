@@ -420,7 +420,7 @@ def page_market():
 
     @st.cache_data(ttl=300)
     def _mkt_news():
-        return nf.fetch_stock_news(max_per_ticker=2)
+        return nf.fetch_stock_news()
 
     col_nl, col_nr = st.columns([1, 3])
     with col_nl:
@@ -1958,7 +1958,7 @@ def page_cycle():
 
     @st.cache_data(ttl=300)
     def _load_news():
-        return nf.fetch_stock_news(max_per_ticker=2)
+        return nf.fetch_stock_news()
 
     col_n1, col_n2 = st.columns([1, 3])
     with col_n1:
