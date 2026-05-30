@@ -379,17 +379,37 @@ def _quick_zh(title: str) -> str:
     return "・".join(parts) if parts else ""
 
 
+def is_key_news(title: str, impact: dict) -> bool:
+    """
+    判斷是否為重點新聞（財報/展望/大事件/強題材匹配）。
+    """
+    t = title.lower()
+    key_patterns = [
+        "earnings", "beat", "miss", "guidance", "outlook", "forecast",
+        "record", "all-time", "trillion", "acquisition", "merger",
+        "layoff", "ipo", "price target", "upgrade", "downgrade",
+        "rate cut", "fomc", "fed", "quarterly result",
+        "q1","q2","q3","q4", "revenue", "profit",
+    ]
+    # 有強題材且有台股對照 = 重點
+    has_theme = bool(impact.get("matched"))
+    has_tw    = len(impact.get("tw_stocks", [])) >= 3
+    has_kw    = any(kw in t for kw in key_patterns)
+    return (has_kw and has_theme) or (has_tw and has_kw)
+
+
 def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
     """
-    批次生成所有新聞的中文摘要（一行，自動顯示）。
-    有 API Key → 用 Claude Haiku 一次翻譯所有標題（1 個 API 呼叫）
-    沒有 API → 用關鍵字快速生成
+    批次生成所有新聞的中文摘要。
+    無 API → 關鍵字版
+    有 API → 分批次（每批 20 則）呼叫 Claude Haiku 翻譯所有標題
     """
+    import re as _re
     result: Dict[int, str] = {}
 
+    # 無 API：全部用關鍵字版
     api_key = get_api_key()
     if not api_key:
-        # 無 API：關鍵字版
         for i, n in enumerate(news_list):
             s = _quick_zh(n["title"])
             if s:
@@ -397,50 +417,56 @@ def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
         return result
 
     try:
-        import anthropic, re
+        import anthropic
         client = anthropic.Anthropic(api_key=api_key)
 
-        # 建立新聞清單 + 各則已知的相關台股（作為多空參考）
-        items_str_parts = []
-        for i, n in enumerate(news_list[:25]):
-            impact = tag_news_impact(n["title"])
-            tw_ref = "、".join(name for _, name in impact.get("tw_stocks", [])[:4])
-            items_str_parts.append(
-                f"{i+1}. {n['title']}"
-                + (f"\n   [相關台股：{tw_ref}]" if tw_ref else "")
-            )
-        items_str = "\n".join(items_str_parts)
+        BATCH = 20  # 每批 20 則，避免 token 超限
 
-        # 只要中文標題一行，乾淨不分析
-        titles_only = "\n".join(
-            f"{i+1}. {n['title']}" for i, n in enumerate(news_list[:25])
-        )
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=500,
-            messages=[{"role": "user", "content": (
-                f"請將以下英文新聞標題翻成繁體中文，每則用一句話（20~35字）說清楚「誰做了什麼事」。\n"
-                f"格式：數字. 中文標題（直接說重點，不要加評論或分析）\n\n"
-                f"範例：\n"
-                f"1. 輝達第二季財報大幅超越預期，AI 晶片需求持續爆發，股價盤後上漲 8%\n"
-                f"2. 文藝復興基金減持美光科技持股約 2 千萬美元\n\n"
-                f"新聞：\n{titles_only}"
-            )}],
-        )
-        text = msg.content[0].text
-        for line in text.strip().split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            m = re.match(r"^(\d+)[\.。、]\s*(.+)$", line)
-            if m:
-                idx     = int(m.group(1)) - 1
-                summary = m.group(2).strip()
-                if 0 <= idx < len(news_list) and summary:
-                    result[idx] = summary
+        def _translate_batch(batch_items):
+            """翻譯一批新聞，回傳 {local_idx: 中文}"""
+            titles_str = "\n".join(
+                f"{j+1}. {item['title']}" for j, item in enumerate(batch_items)
+            )
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=700,
+                messages=[{"role": "user", "content": (
+                    f"請將以下英文新聞標題翻成繁體中文，每則用一句話（20~35字）說清楚「誰做了什麼事」。\n"
+                    f"格式：數字. 中文標題（直接說重點，不要加評論）\n\n"
+                    f"範例：\n"
+                    f"1. 輝達第二季財報超預期，AI 晶片需求持續爆發，股價盤後漲 8%\n"
+                    f"2. 文藝復興基金減持美光科技持股約 2 千萬美元\n\n"
+                    f"新聞：\n{titles_str}"
+                )}],
+            )
+            batch_result = {}
+            for line in msg.content[0].text.strip().split("\n"):
+                line = line.strip()
+                m = _re.match(r"^(\d+)[\.。、]\s*(.+)$", line)
+                if m:
+                    local_idx = int(m.group(1)) - 1
+                    summary   = m.group(2).strip()
+                    if 0 <= local_idx < len(batch_items) and summary:
+                        batch_result[local_idx] = summary
+            return batch_result
+
+        # 分批次翻譯
+        for batch_start in range(0, len(news_list), BATCH):
+            batch = news_list[batch_start:batch_start + BATCH]
+            try:
+                batch_result = _translate_batch(batch)
+                for local_idx, summary in batch_result.items():
+                    result[batch_start + local_idx] = summary
+            except Exception:
+                # 這批失敗 → 用關鍵字補
+                for j, n in enumerate(batch):
+                    s = _quick_zh(n["title"])
+                    if s:
+                        result[batch_start + j] = s
+
         return result
     except Exception:
-        # 失敗降級為關鍵字版
+        # 全部失敗 → 關鍵字版
         for i, n in enumerate(news_list):
             s = _quick_zh(n["title"])
             if s:

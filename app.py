@@ -474,26 +474,28 @@ def page_market():
                     + '</div>'
                 )
 
-            auto_zh = auto_summaries.get(idx, "")
+            auto_zh  = auto_summaries.get(idx, "")
+            is_key   = nf.is_key_news(item["title"], impact)
+            key_badge = ('<span style="background:#dc2626;color:#fff;border-radius:4px;'
+                         'padding:1px 7px;font-size:0.7em;font-weight:700;margin-left:6px">'
+                         '★ 重點</span>') if is_key else ""
+            # 重點新聞用亮色邊框
+            card_color = "#fbbf24" if is_key else color
 
             # ── 新聞卡片：乾淨單層 ───────────────────────────────────────
-            # 有詳細分析時：只顯示分析（取代自動中文標題）
-            # 沒有詳細分析：顯示自動中文標題 + 按鈕
-
             if saved_zh:
                 # 已按過按鈕 → 顯示完整分析
                 st.markdown(
                     f'<div style="background:#1e293b;border-radius:8px;padding:12px 14px;'
-                    f'border-left:3px solid {color};margin-bottom:4px;">'
+                    f'border-left:4px solid {card_color};margin-bottom:4px;">'
                     f'<div style="display:flex;align-items:center;gap:5px;margin-bottom:5px">'
                     f'<span style="color:#64748b;font-size:0.7em">🇹🇼 {item["time"]}'
                     f'&nbsp;·&nbsp;🇺🇸 {item.get("time_us","")}</span>'
                     f'&nbsp;&nbsp;<span style="color:#475569;font-size:0.7em">{item["publisher"][:16]}</span>'
-                    f'{theme_badge}</div>'
+                    f'{theme_badge}{key_badge}</div>'
                     f'<div style="color:#94a3b8;font-size:0.75em;margin-bottom:8px">'
                     f'<a href="{item["url"]}" target="_blank" style="color:#94a3b8;text-decoration:none">'
                     f'{item["title"][:70]}{"…" if len(item["title"])>70 else ""}</a></div>'
-                    # 完整分析內容
                     f'<div style="padding:10px 12px;background:#0f172a;border-radius:6px;'
                     f'font-size:0.87em;line-height:1.9;white-space:pre-wrap;color:#e2e8f0">'
                     f'{saved_zh}</div>'
@@ -504,15 +506,17 @@ def page_market():
             else:
                 # 還沒分析 → 顯示自動中文標題 + 按鈕
                 st.markdown(
-                    f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;'
-                    f'border-left:3px solid {color};margin-bottom:2px;">'
+                    f'<div style="background:{"#1c1a00" if is_key else "#1e293b"};'
+                    f'border-radius:8px;padding:10px 14px;'
+                    f'border-left:{"5px" if is_key else "3px"} solid {card_color};margin-bottom:2px;">'
                     f'<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">'
                     f'<span style="color:#64748b;font-size:0.7em">🇹🇼 {item["time"]}'
                     f'&nbsp;·&nbsp;🇺🇸 {item.get("time_us","")}</span>'
                     f'&nbsp;&nbsp;<span style="color:#475569;font-size:0.7em">{item["publisher"][:16]}</span>'
-                    f'{theme_badge}</div>'
+                    f'{theme_badge}{key_badge}</div>'
                     # 中文標題（主要閱讀）
-                    + (f'<div style="color:#f1f5f9;font-size:0.92em;font-weight:600;'
+                    + (f'<div style="color:#{"fbbf24" if is_key else "f1f5f9"};'
+                       f'font-size:0.92em;font-weight:{"700" if is_key else "600"};'
                        f'margin-bottom:3px">{auto_zh}</div>' if auto_zh else "")
                     # 英文原標題（小字備查）
                     + f'<div style="color:#475569;font-size:0.72em">'
@@ -522,7 +526,6 @@ def page_market():
                     + f'</div>',
                     unsafe_allow_html=True,
                 )
-                # 分析按鈕
                 if st.button("詳細分析（多空 + 題材）",
                              key=f"mkt_ai_{idx}", use_container_width=True):
                     if not has_api:
