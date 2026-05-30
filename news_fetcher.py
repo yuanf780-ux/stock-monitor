@@ -392,11 +392,18 @@ def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
         )
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=400,
+            max_tokens=600,
             messages=[{"role": "user", "content": (
-                f"請將以下英文新聞標題翻譯成繁體中文，每則用15字以內的一句話說明重點。\n"
-                f"格式：數字. 中文內容（不要說「關於」「此新聞」等廢話，直接說重點）\n\n"
-                f"{titles_str}"
+                f"以下是英文財經新聞標題，請用繁體中文濃縮每則新聞的核心重點。\n\n"
+                f"規則：\n"
+                f"- 每則用「20~35字」的一句話說清楚「誰做了什麼，結果是什麼」\n"
+                f"- 直接說重點，不要說「根據」「此新聞報導」等廢話\n"
+                f"- 數字、公司名保留（可用中文公司名）\n"
+                f"- 格式：編號. 中文內容\n\n"
+                f"範例：\n"
+                f"1. 輝達 Q2 財報超預期，AI 晶片需求爆發，股價盤後大漲 8%\n"
+                f"2. 美光科技上調全年展望，HBM 記憶體供不應求，目標價調升至 120 美元\n\n"
+                f"新聞標題：\n{titles_str}"
             )}],
         )
         text = msg.content[0].text
