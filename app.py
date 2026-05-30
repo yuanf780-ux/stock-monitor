@@ -418,18 +418,19 @@ def page_market():
     st.divider()
     st.markdown("### 即時財經新聞")
 
-    @st.cache_data(ttl=1800)
+    @st.cache_data(ttl=300)
     def _mkt_news():
         return nf.fetch_stock_news(max_per_ticker=2)
 
     col_nl, col_nr = st.columns([1, 3])
     with col_nl:
-        reload_news = st.button("重新載入新聞", use_container_width=True)
+        reload_news = st.button("重新載入新聞", use_container_width=True, type="primary")
     with col_nr:
-        st.caption("每 30 分鐘快取 · 按「中文解析」→ 有 API Key 即時 AI 分析，無 Key 顯示設定說明")
+        st.caption("每 5 分鐘自動更新 · 點「重新載入新聞」可立即抓最新 · 點「中文解析」取得 AI 分析")
 
     if reload_news:
-        st.cache_data.clear()
+        _mkt_news.clear()   # 只清新聞快取，不影響股價快取
+        st.rerun()
 
     with st.spinner("載入新聞中…"):
         news_list = _mkt_news()
@@ -1926,7 +1927,7 @@ def page_cycle():
     st.subheader("即時財經新聞  ×  產業影響")
     st.caption("自動標記每則新聞對台股哪些族群和標的的影響")
 
-    @st.cache_data(ttl=1800)
+    @st.cache_data(ttl=300)
     def _load_news():
         return nf.fetch_stock_news(max_per_ticker=2)
 
