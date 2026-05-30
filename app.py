@@ -16,6 +16,7 @@ import tw_us_map
 import supply_chain as sc
 import institutional as inst
 import us_tw_impact as uti
+import cycle as cyc
 
 # ── Page Config ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -145,6 +146,7 @@ with st.sidebar:
     st.divider()
 
     _pages = [
+        "景氣循環 & 明日台股",
         "即時大盤",
         "自選股列表",
         "個股深度分析",
@@ -1592,9 +1594,196 @@ def page_us_signal():
     st.caption("⚠️ 題材連動為市場慣性參考，不代表必然漲跌。投資有風險，請審慎評估。")
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# PAGE: 景氣循環 & 明日台股
+# ══════════════════════════════════════════════════════════════════════════
+def page_cycle():
+    st.title("景氣循環 & 明日台股")
+    st.caption("根據美股夜盤 + 總體指標，推算目前景氣位置與明日可能強勢標的")
+
+    @st.cache_data(ttl=900)
+    def _load_indicators():
+        result = {}
+        for sym in cyc.INDICATORS:
+            result[sym] = cyc.fetch_indicator(sym)
+        return result
+
+    @st.cache_data(ttl=300)
+    def _load_us_prices():
+        from data_fetcher import fetch_batch_prices
+        return fetch_batch_prices(uti.US_WATCHLIST)
+
+    with st.spinner("載入景氣指標與美股資料…"):
+        indicators = _load_indicators()
+        us_prices  = _load_us_prices()
+
+    cycle_result = cyc.compute_cycle_score(indicators)
+    phase        = cycle_result["phase"]
+    phase_info   = cycle_result["phase_info"]
+    score        = cycle_result["score"]
+    reasons      = cycle_result["reasons"]
+
+    # ── 景氣循環大標題卡 ────────────────────────────────────────────
+    pcolor = phase_info["color"]
+    st.markdown(
+        f'<div style="background:#1e293b;border-radius:14px;padding:20px 24px;'
+        f'border-left:6px solid {pcolor};margin-bottom:16px;">'
+        f'<div style="font-size:0.8em;color:#94a3b8;font-weight:600">目前景氣循環階段</div>'
+        f'<div style="font-size:2.2em;font-weight:800;color:{pcolor}">'
+        f'{phase_info["emoji"]} {phase}</div>'
+        f'<div style="font-size:1em;color:#cbd5e1;margin-top:4px">{phase_info["desc"]}</div>'
+        f'<div style="margin-top:10px;">'
+        f'<div style="background:#0f172a;border-radius:8px;height:14px;overflow:hidden;">'
+        f'<div style="background:{pcolor};height:100%;width:{min(100,max(0,(score+10)/20*100)):.0f}%"></div>'
+        f'</div>'
+        f'<div style="display:flex;justify-content:space-between;font-size:0.7em;color:#64748b;margin-top:3px">'
+        f'<span>衰退期</span><span>高峰期</span><span>復甦期</span><span>擴張期</span>'
+        f'</div></div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── 判斷依據 ────────────────────────────────────────────────────
+    with st.expander("判斷依據（點開看各指標說明）", expanded=False):
+        for r in reasons:
+            arrow = "▲" if any(k in r for k in ["多頭","正斜","平靜","樂觀","強勢","偏弱","站穩"]) else "▼"
+            color = "#4ade80" if "多頭" in r or "平靜" in r or "樂觀" in r or "偏弱" in r else "#f87171"
+            st.markdown(f'<span style="color:{color}">{arrow}</span> {r}', unsafe_allow_html=True)
+
+    # ── 關鍵指標面板 ────────────────────────────────────────────────
+    st.markdown("#### 關鍵總體指標")
+    ind_list = [
+        ("^GSPC",    "S&P 500"),
+        ("^VIX",     "VIX 恐慌指數"),
+        ("^TNX",     "10Y 美債利率"),
+        ("^IRX",     "3M 美債利率"),
+        ("DX-Y.NYB", "美元指數 DXY"),
+        ("GC=F",     "黃金"),
+        ("CL=F",     "原油 WTI"),
+        ("^TWII",    "台股加權指數"),
+    ]
+    rows = [ind_list[i:i+4] for i in range(0, len(ind_list), 4)]
+    for row in rows:
+        cols = st.columns(4)
+        for col, (sym, label) in zip(cols, row):
+            d = indicators.get(sym, {})
+            if not d:
+                col.markdown(f'<div style="background:#1e293b;border-radius:8px;padding:10px;margin-bottom:6px"><div style="font-size:0.72em;color:#64748b">{label}</div><div style="color:#475569">—</div></div>', unsafe_allow_html=True)
+                continue
+            pct = d.get("pct", 0)
+            pc  = "#4ade80" if pct >= 0 else "#f87171"
+            ar  = "▲" if pct >= 0 else "▼"
+            vs200 = d.get("vs_ma200_pct")
+            vs200_txt = f"vs MA200: {vs200:+.1f}%" if vs200 else ""
+            with col:
+                st.markdown(
+                    f'<div style="background:#1e293b;border-radius:8px;padding:10px 12px;margin-bottom:6px;">'
+                    f'<div style="font-size:0.72em;color:#64748b">{label}</div>'
+                    f'<div style="font-size:1.15em;font-weight:700;color:#fff">{d["price"]:,.2f}</div>'
+                    f'<div style="color:{pc};font-size:0.82em">{ar} {pct:+.2f}%</div>'
+                    f'<div style="color:#475569;font-size:0.7em">{vs200_txt}</div>'
+                    f'</div>', unsafe_allow_html=True)
+
+    # ── 殖利率曲線 ──────────────────────────────────────────────────
+    y10 = indicators.get("^TNX", {}).get("price")
+    y3m = indicators.get("^IRX", {}).get("price")
+    if y10 and y3m:
+        spread = y10 - y3m
+        sc = "#4ade80" if spread > 0 else "#ef4444"
+        invert_warn = '<span style="color:#ef4444">⚠️ 殖利率倒掛，衰退風險</span>' if spread < 0 else ""
+        st.markdown(
+            f'<div style="background:#1e293b;border-radius:8px;padding:10px 14px;margin-bottom:12px;">'
+            f'<span style="color:#94a3b8;font-size:0.85em">殖利率曲線（10Y - 3M）：</span>'
+            f'<span style="color:{sc};font-weight:700;font-size:1.1em"> {spread:+.2f}%</span>'
+            f'  {invert_warn}'
+            f'</div>', unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── 這個階段該買什麼 ─────────────────────────────────────────
+    st.markdown(f"#### {phase_info['emoji']} {phase} — 建議關注族群")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**台股優先關注**")
+        for s in phase_info["tw_buy"]:
+            st.markdown(f'<span class="theme-tag" style="background:#14532d;color:#86efac;font-size:0.9em">▲ {s}</span>', unsafe_allow_html=True)
+        st.markdown("<br>**台股暫時迴避**", unsafe_allow_html=True)
+        for s in phase_info["tw_avoid"]:
+            st.markdown(f'<span class="theme-tag" style="background:#450a0a;color:#fca5a5;font-size:0.9em">▼ {s}</span>', unsafe_allow_html=True)
+    with c2:
+        st.markdown("**美股優先關注**")
+        for s in phase_info["us_buy"]:
+            p = us_prices.get(s, {})
+            pstr = f'  `{p["price"]:,.2f}`  `{p["pct"]:+.1f}%`' if p else ""
+            st.markdown(f'<span class="theme-tag" style="background:#14532d;color:#86efac;font-size:0.9em">▲ {s}{pstr}</span>', unsafe_allow_html=True)
+        st.markdown("<br>**美股暫時迴避**", unsafe_allow_html=True)
+        for s in phase_info["us_avoid"]:
+            st.markdown(f'<span class="theme-tag" style="background:#450a0a;color:#fca5a5;font-size:0.9em">▼ {s}</span>', unsafe_allow_html=True)
+
+    st.divider()
+
+    # ── 明日台股可能強勢標的 ─────────────────────────────────────
+    st.markdown("#### 美股今日訊號 → 明日台股可能強勢標的")
+    st.caption("依美股漲跌幅排序，超過 ±1.5% 才列入")
+
+    morning = cyc.morning_signal(us_prices)
+    if not morning:
+        st.info("目前美股尚未有顯著漲跌信號（>±1.5%）")
+    else:
+        for sig in morning:
+            pct    = sig["pct"]
+            color  = "#22c55e" if pct > 0 else "#ef4444"
+            arrow  = "▲" if pct > 0 else "▼"
+            tw_list = sig["tw_stocks"]
+
+            st.markdown(
+                f'<div style="background:#1e293b;border-radius:10px;padding:12px 16px;'
+                f'margin-bottom:8px;border-left:4px solid {color};">'
+                f'<div style="display:flex;justify-content:space-between;align-items:center;">'
+                f'<div>'
+                f'  <span style="color:#94a3b8;font-size:0.8em">美股 {sig["sym"]}</span>'
+                f'  <span style="background:#1e3a5f;color:#93c5fd;border-radius:3px;'
+                f'    padding:1px 7px;font-size:0.75em;margin-left:6px">{sig["theme"].split("/")[0][:12]}</span>'
+                f'</div>'
+                f'<div style="color:{color};font-weight:700;font-size:1.1em">'
+                f'{arrow} {abs(pct):.2f}%</div>'
+                f'</div>'
+                f'<div style="font-weight:600;color:#f1f5f9;margin-top:4px">{sig["name"]}</div>'
+                f'<div style="color:#64748b;font-size:0.78em;margin-top:2px">'
+                f'{sig["direction"]}→ {sig["reason"][:50]}{"..." if len(sig["reason"])>50 else ""}'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+
+            # 台股明日可能標的
+            if tw_list:
+                tw_prices_local = _batch_prices(tuple(
+                    t for t, _, _ in tw_list
+                    if not any(k in t for k in ["廠","牌"])
+                ))
+                tw_cols = st.columns(min(len(tw_list), 3))
+                for i, (t, n, note) in enumerate(tw_list[:6]):
+                    p = tw_prices_local.get(t, {})
+                    pstr = f'{p["price"]:,.2f}  {("▲" if p["pct"]>=0 else "▼")}{p["pct"]:+.1f}%' if p else "—"
+                    with tw_cols[i % len(tw_cols)]:
+                        st.markdown(
+                            f'<div style="background:#0f172a;border-left:3px solid {color};'
+                            f'border-radius:6px;padding:7px 10px;margin-bottom:4px;">'
+                            f'<div style="font-size:0.72em;color:#475569">{t}</div>'
+                            f'<div style="font-weight:600;color:#e2e8f0;font-size:0.9em">{n}</div>'
+                            f'<div style="color:#94a3b8;font-size:0.8em">{pstr}</div>'
+                            f'<div style="color:#475569;font-size:0.68em">{note[:20]}</div>'
+                            f'</div>', unsafe_allow_html=True)
+                        if st.button("分析", key=f"cy_{t}_{i}", use_container_width=True):
+                            goto_detail(t, n); st.rerun()
+
+    st.caption("⚠️ 景氣循環判斷為輔助參考，不構成投資建議。")
+
+
 # ── Route to page ─────────────────────────────────────────════════════════
 p = st.session_state.page
-if p == "即時大盤":
+if p == "景氣循環 & 明日台股":
+    page_cycle()
+elif p == "即時大盤":
     page_market()
 elif p == "自選股列表":
     page_watchlist()
