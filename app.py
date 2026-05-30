@@ -853,7 +853,7 @@ def page_detail():
             for i, t in enumerate(supported):
                 with sc_cols[i % 4]:
                     n = sc.SUPPLY_CHAIN[t].get("name", t)
-                    if st.button(f"{n}\n{t}", key=f"sc_jump_{t}", use_container_width=True):
+                    if st.button(n, key=f"sc_jump_{t}", use_container_width=True):
                         goto_detail(t, n)
         else:
             st.markdown(f"#### 🌳 {chain.get('name',ticker)} 供應鏈地圖")
@@ -996,7 +996,7 @@ def page_detail():
                             f'<div style="color:#6b7280;font-size:0.72em;margin-top:2px">{note} {chain_badge}</div>'
                             f'</div>', unsafe_allow_html=True)
                         if sc.get_supply_chain(t) or sc.get_themes(t):
-                            btn_label = "🌳 展開供應鏈" if has_chain else "🔬 深度分析"
+                            btn_label = "展開供應鏈" if has_chain else "分析"
                             if st.button(btn_label, key=f"chain_{section_key}_{t}_{i}",
                                          use_container_width=True):
                                 goto_detail(t, n)
