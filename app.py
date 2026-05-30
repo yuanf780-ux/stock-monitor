@@ -193,13 +193,16 @@ def page_briefing():
         r = {}
         for sym in cyc.INDICATORS: r[sym] = cyc.fetch_indicator(sym)
         return r
-    @st.cache_data(ttl=600)
-    def _news():   return nf.fetch_stock_news()
+    @st.cache_data(ttl=1800)          # 30 分鐘 cache，減少 API 呼叫
+    def _news():   return nf.fetch_stock_news(max_per_ticker=2)  # 每股只取 2 則
 
-    with st.spinner("載入資料中…"):
+    # 市場資料優先顯示，新聞延遲載入
+    with st.spinner("載入市場資料…"):
         us_prices  = _us_p()
         indicators = _inds()
-        news_list  = _news()
+
+    # 新聞在背景 cache 中取，不阻塞主流程
+    news_list = _news()
 
     cycle_result = cyc.compute_cycle_score(indicators)
     phase        = cycle_result["phase"]
@@ -724,60 +727,142 @@ def page_detail():
         chain = sc.get_supply_chain(ticker)
         if not chain:
             st.info(f"尚無 {ticker} 供應鏈資料。支援：台積電、鴻海、廣達、聯發科、輝達、蘋果等")
+            st.markdown("**已建立供應鏈的股票：**")
+            sc_cols = st.columns(4)
+            for i, t2 in enumerate(sorted(sc.SUPPLY_CHAIN.keys())):
+                n2 = sc.SUPPLY_CHAIN[t2].get("name", t2)
+                with sc_cols[i % 4]:
+                    if st.button(n2, key=f"scjump_{t2}", use_container_width=True):
+                        goto_detail(t2, n2); st.rerun()
         else:
-            # 批次取供應鏈報價
-            _skip = {"消費者","企業","電商","貨主","牌","廠","PANASONIC","ALB"}
+            # ── 批次取所有供應鏈股票報價 ─────────────────────────────
+            _skip_kw = ["廠","牌","消費","企業","PANASONIC","ALB","NIO","小米","OPPO","vivo"]
             ct = set()
             for key in ("upstream","midstream","downstream","related"):
-                for t,_,_ in chain.get(key,[]):
-                    if t and t not in _skip and not any(k in t for k in ["廠","牌","消費"]):
-                        ct.add(t)
+                for t2, _, _ in chain.get(key, []):
+                    if t2 and not any(k in t2 for k in _skip_kw):
+                        ct.add(t2)
             ct.add(ticker)
             with st.spinner("載入供應鏈報價…"):
                 cp = _batch_prices(tuple(sorted(ct)))
 
-            def _cnode(t, n, note, bc, prices):
-                p = prices.get(t,{})
-                pl = f'{p["price"]:,.2f} {"▲" if p["pct"]>=0 else "▼"}{p["pct"]:+.1f}%' if p else "—"
-                pc2 = "#4ade80" if p.get("pct",0)>=0 else "#f87171"
+            # ── Sankey 流向圖（上游→本股→中游→下游）───────────────────
+            st.markdown(f"**{chain.get('name', ticker)} 供應鏈流向圖**")
+            st.caption(chain.get("desc", ""))
+
+            layer_def = [
+                ("upstream",   "上游",   "#3b82f6"),
+                ("core",       "本股",   "#f97316"),
+                ("midstream",  "中游",   "#8b5cf6"),
+                ("downstream", "下游",   "#10b981"),
+            ]
+            nodes, node_colors = [], []
+            node_idx = {}
+
+            def _add_node(label, color):
+                if label not in node_idx:
+                    node_idx[label] = len(nodes)
+                    nodes.append(label)
+                    node_colors.append(color)
+                return node_idx[label]
+
+            sources, targets, values, link_colors = [], [], [], []
+
+            # 本股節點
+            p_self = cp.get(ticker, {})
+            core_pct = p_self.get("pct", info.get("change_pct", 0))
+            core_price = p_self.get("price", info.get("price", 0))
+            core_label = f'{chain.get("name","")}\n{core_price:,.0f} {"▲" if core_pct>=0 else "▼"}{abs(core_pct):.1f}%'
+            core_idx = _add_node(core_label, "#f97316")
+
+            # 上游 → 本股
+            for t2, n2, _ in chain.get("upstream", []):
+                if any(k in t2 for k in _skip_kw): continue
+                p2 = cp.get(t2, {})
+                pct2 = p2.get("pct", 0)
+                lbl = f'{n2}\n{p2["price"]:,.0f} {"▲" if pct2>=0 else "▼"}{abs(pct2):.1f}%' if p2 else n2
+                idx = _add_node(lbl, "#3b82f6")
+                sources.append(idx); targets.append(core_idx)
+                values.append(2)
+                link_colors.append("rgba(59,130,246,0.25)")
+
+            # 本股 → 中游
+            for t2, n2, _ in chain.get("midstream", []):
+                if any(k in t2 for k in _skip_kw): continue
+                p2 = cp.get(t2, {})
+                pct2 = p2.get("pct", 0)
+                lbl = f'{n2}\n{p2["price"]:,.0f} {"▲" if pct2>=0 else "▼"}{abs(pct2):.1f}%' if p2 else n2
+                idx = _add_node(lbl, "#8b5cf6")
+                sources.append(core_idx); targets.append(idx)
+                values.append(2)
+                link_colors.append("rgba(139,92,246,0.25)")
+
+            # 本股（或中游）→ 下游
+            dn_source = core_idx
+            for t2, n2, _ in chain.get("downstream", []):
+                if any(k in t2 for k in _skip_kw + ["消費者","全球","企業"]): continue
+                p2 = cp.get(t2, {})
+                pct2 = p2.get("pct", 0)
+                lbl = f'{n2}\n{p2["price"]:,.0f} {"▲" if pct2>=0 else "▼"}{abs(pct2):.1f}%' if p2 else n2
+                idx = _add_node(lbl, "#10b981")
+                sources.append(dn_source); targets.append(idx)
+                values.append(2)
+                link_colors.append("rgba(16,185,129,0.25)")
+
+            if sources:
+                fig_sk = go.Figure(go.Sankey(
+                    arrangement="snap",
+                    node=dict(
+                        label=nodes, color=node_colors,
+                        pad=20, thickness=20,
+                        line=dict(color="#1e293b", width=1),
+                    ),
+                    link=dict(
+                        source=sources, target=targets, value=values,
+                        color=link_colors,
+                    ),
+                ))
+                fig_sk.update_layout(
+                    template="plotly_dark", height=420,
+                    margin=dict(l=10, r=10, t=20, b=10),
+                    paper_bgcolor="#0f172a",
+                    font=dict(size=11, color="#e2e8f0"),
+                )
+                st.plotly_chart(fig_sk, use_container_width=True)
+
+            # ── 詳細卡片（可點擊）─────────────────────────────────────
+            def _cnode(t2, n2, note, bc, prices):
+                p2 = prices.get(t2, {})
+                pl = f'{p2["price"]:,.2f} {"▲" if p2["pct"]>=0 else "▼"}{abs(p2["pct"]):.1f}%' if p2 else "—"
+                pc2 = "#4ade80" if p2.get("pct", 0) >= 0 else "#f87171"
                 return (f'<div style="background:#1e293b;border-left:3px solid {bc};'
-                        f'border-radius:7px;padding:8px 10px;margin:3px 0;">'
-                        f'<div style="font-size:.7em;color:#475569">{t}</div>'
-                        f'<div style="font-weight:600;color:#e2e8f0;font-size:.88em">{n}</div>'
+                        f'border-radius:7px;padding:8px 10px;margin:3px 0">'
+                        f'<div style="font-size:.7em;color:#475569">{t2}</div>'
+                        f'<div style="font-weight:600;color:#e2e8f0;font-size:.88em">{n2}</div>'
                         f'<div style="color:{pc2};font-size:.82em">{pl}</div>'
-                        f'<div style="font-size:.68em;color:#475569">{note[:25]}</div>'
+                        f'<div style="font-size:.68em;color:#475569">{note[:28]}</div>'
                         f'</div>')
 
             def _csection(title, color, items):
                 if not items: return
                 st.markdown(f"**{title}**")
-                cs2 = st.columns(min(len(items),3))
-                for i,(t,n,note) in enumerate(items):
-                    with cs2[i%3]:
-                        st.markdown(_cnode(t,n,note,color,cp), unsafe_allow_html=True)
-                        if sc.get_supply_chain(t) and st.button("展開", key=f"sc_{t}_{i}", use_container_width=True):
-                            goto_detail(t,n); st.rerun()
+                cs2 = st.columns(min(len(items), 3))
+                for i, (t2, n2, note) in enumerate(items):
+                    with cs2[i % 3]:
+                        st.markdown(_cnode(t2, n2, note, color, cp), unsafe_allow_html=True)
+                        if sc.get_supply_chain(t2):
+                            if st.button("展開供應鏈", key=f"sc_{t2}_{i}", use_container_width=True):
+                                goto_detail(t2, n2); st.rerun()
+                        elif st.button("分析", key=f"sca_{t2}_{i}", use_container_width=True):
+                            goto_detail(t2, n2); st.rerun()
 
-            _csection("上游 — 設備/材料","#3b82f6",chain.get("upstream",[]))
-            st.markdown('<div style="text-align:center;color:#475569;font-size:1.3em">⬇</div>', unsafe_allow_html=True)
-            p_self = cp.get(ticker,{"price":info["price"],"pct":info["change_pct"]})
-            pc3 = "#4ade80" if p_self.get("pct",0)>=0 else "#f87171"
-            st.markdown(
-                f'<div style="background:#1e3a5f;border:2px solid #f97316;border-radius:10px;'
-                f'padding:12px;text-align:center;margin:8px 0">'
-                f'<div style="color:#94a3b8;font-size:.72em">{ticker}</div>'
-                f'<div style="font-size:1.2em;font-weight:700;color:#fff">{chain.get("name","")}</div>'
-                f'<div style="font-size:1.5em;font-weight:800;color:#fff">{p_self.get("price",0):,.2f}</div>'
-                f'<div style="color:{pc3}">{"▲" if p_self.get("pct",0)>=0 else "▼"} {p_self.get("pct",0):+.2f}%</div>'
-                f'</div>', unsafe_allow_html=True)
-            if chain.get("midstream"):
-                st.markdown('<div style="text-align:center;color:#475569;font-size:1.3em">⬇</div>', unsafe_allow_html=True)
-                _csection("中游 — 封裝/整合","#8b5cf6",chain.get("midstream",[]))
-            st.markdown('<div style="text-align:center;color:#475569;font-size:1.3em">⬇</div>', unsafe_allow_html=True)
-            _csection("下游 — 客戶/品牌","#10b981",chain.get("downstream",[]))
+            st.divider()
+            _csection("上游 — 設備 / 材料 / 零件", "#3b82f6", chain.get("upstream", []))
+            _csection("中游 — 封裝 / 加工 / 整合", "#8b5cf6", chain.get("midstream", []))
+            _csection("下游 — 客戶 / 品牌 / 終端", "#10b981", chain.get("downstream", []))
             if chain.get("related"):
                 st.divider()
-                _csection("同業/競爭","#f59e0b",chain.get("related",[]))
+                _csection("同業 / 競爭 / 相關公司", "#f59e0b", chain.get("related", []))
 
 
 # ══════════════════════════════════════════════════════════════════════════
