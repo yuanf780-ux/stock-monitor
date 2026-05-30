@@ -385,40 +385,64 @@ def batch_auto_summary(news_list: List[Dict]) -> Dict[int, str]:
         return result
 
     try:
-        import anthropic
+        import anthropic, re
         client = anthropic.Anthropic(api_key=api_key)
-        titles_str = "\n".join(
-            f"{i+1}. {n['title']}" for i, n in enumerate(news_list[:15])
-        )
+
+        # 建立新聞清單 + 各則已知的相關台股（作為多空參考）
+        items_str_parts = []
+        for i, n in enumerate(news_list[:12]):
+            impact = tag_news_impact(n["title"])
+            tw_ref = "、".join(name for _, name in impact.get("tw_stocks", [])[:4])
+            items_str_parts.append(
+                f"{i+1}. {n['title']}"
+                + (f"\n   [相關台股：{tw_ref}]" if tw_ref else "")
+            )
+        items_str = "\n".join(items_str_parts)
+
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=600,
+            max_tokens=1200,
             messages=[{"role": "user", "content": (
-                f"以下是英文財經新聞標題，請用繁體中文濃縮每則新聞的核心重點。\n\n"
-                f"規則：\n"
-                f"- 每則用「20~35字」的一句話說清楚「誰做了什麼，結果是什麼」\n"
-                f"- 直接說重點，不要說「根據」「此新聞報導」等廢話\n"
-                f"- 數字、公司名保留（可用中文公司名）\n"
-                f"- 格式：編號. 中文內容\n\n"
+                f"你是台股投資人，請分析以下每則英文財經新聞，用繁體中文輸出。\n\n"
+                f"每則格式（嚴格按照，不要多餘文字）：\n"
+                f"N| 重點：（1句話說清楚誰做了什麼，20~30字）\n"
+                f"N| 趨勢：（市場方向，10~15字）\n"
+                f"N| 多空：看多→XXX / 看空→XXX（只用台股名稱，沒有填「無」）\n\n"
                 f"範例：\n"
-                f"1. 輝達 Q2 財報超預期，AI 晶片需求爆發，股價盤後大漲 8%\n"
-                f"2. 美光科技上調全年展望，HBM 記憶體供不應求，目標價調升至 120 美元\n\n"
-                f"新聞標題：\n{titles_str}"
+                f"1| 重點：輝達 Q2 財報大幅超預期，AI 晶片需求爆發強勁，股價盤後漲 8%\n"
+                f"1| 趨勢：AI 資本支出加速，算力供應鏈全面受惠\n"
+                f"1| 多空：看多→廣達、英業達、奇鋐 / 看空→無\n\n"
+                f"新聞：\n{items_str}"
             )}],
         )
         text = msg.content[0].text
+
+        # 解析多行格式 N| 標籤: 內容
+        current = {}
         for line in text.strip().split("\n"):
             line = line.strip()
             if not line:
                 continue
-            # 解析「1. 內容」格式
-            import re
-            m = re.match(r"^(\d+)[\.。、]\s*(.+)$", line)
+            m = re.match(r"^(\d+)\s*[|\|]\s*(重點|趨勢|多空)：?\s*(.+)$", line)
             if m:
-                idx = int(m.group(1)) - 1
-                summary = m.group(2).strip()
-                if 0 <= idx < len(news_list) and summary:
-                    result[idx] = summary
+                idx  = int(m.group(1)) - 1
+                tag  = m.group(2)
+                body = m.group(3).strip()
+                if 0 <= idx < len(news_list):
+                    if idx not in current:
+                        current[idx] = {}
+                    current[idx][tag] = body
+
+        for idx, parts in current.items():
+            lines = []
+            if "重點" in parts:
+                lines.append(f"📌 {parts['重點']}")
+            if "趨勢" in parts:
+                lines.append(f"📈 趨勢：{parts['趨勢']}")
+            if "多空" in parts:
+                lines.append(f"⚡ {parts['多空']}")
+            if lines:
+                result[idx] = "\n".join(lines)
         return result
     except Exception:
         # 失敗降級為關鍵字版

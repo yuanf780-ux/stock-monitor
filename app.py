@@ -491,9 +491,13 @@ def page_market():
                 f'<div style="color:#94a3b8;font-size:0.78em">'
                 f'<a href="{item["url"]}" target="_blank" style="color:#94a3b8;text-decoration:none">'
                 f'{item["title"][:80]}{"…" if len(item["title"])>80 else ""}</a></div>'
-                # 中文摘要（粗體，主要閱讀區）
-                + (f'<div style="color:#e2e8f0;font-size:0.92em;font-weight:600;margin-top:3px">'
-                   f'{auto_zh}</div>' if auto_zh else "")
+                # 中文摘要（多行：重點/趨勢/多空，自動換行顯示）
+                + (
+                    f'<div style="margin-top:7px;padding:8px 12px;background:#0f172a;'
+                    f'border-radius:6px;font-size:0.88em;line-height:1.8;'
+                    f'white-space:pre-line;color:#e2e8f0">{auto_zh}</div>'
+                    if auto_zh else ""
+                )
                 + f'{tw_chips}'
                 + (
                     f'<div style="margin-top:8px;padding:8px 12px;background:#0f172a;'
