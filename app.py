@@ -431,7 +431,7 @@ def page_market():
     with col_nl:
         reload_news = st.button("重新載入新聞", use_container_width=True)
     with col_nr:
-        st.caption("每 30 分鐘自動更新 · 每則新聞可按「中文解析」取得 AI 分析")
+        st.caption("每 30 分鐘快取 · 按「中文解析」→ 有 API Key 即時 AI 分析，無 Key 顯示設定說明")
 
     if reload_news:
         st.cache_data.clear()
@@ -494,12 +494,18 @@ def page_market():
                     unsafe_allow_html=True,
                 )
             with col_btn:
-                if has_api:
-                    if st.button("中文解析", key=f"mkt_ai_{idx}", use_container_width=True):
-                        with st.spinner("分析中…"):
+                if st.button("中文解析", key=f"mkt_ai_{idx}", use_container_width=True):
+                    if not has_api:
+                        st.session_state[cache_key] = (
+                            "⚠️ 需要設定 ANTHROPIC_API_KEY 才能使用 AI 解析。\n"
+                            "請到 Streamlit Cloud → Manage app → Secrets，加入：\n"
+                            "ANTHROPIC_API_KEY = \"sk-ant-xxxxx\""
+                        )
+                    else:
+                        with st.spinner("Claude 分析中…"):
                             zh = nf.zh_news_analysis(item, impact)
                         st.session_state[cache_key] = zh
-                        st.rerun()
+                    st.rerun()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1992,10 +1998,17 @@ def page_cycle():
                     unsafe_allow_html=True,
                 )
             with col_ai:
-                if has_api and st.button("AI 解析", key=f"news_ai_{idx}", use_container_width=True):
-                    with st.spinner("Claude 分析中…"):
-                        zh = nf.zh_news_analysis(news_item, impact)
-                    st.session_state[cache_key] = zh
+                if st.button("中文解析", key=f"news_ai_{idx}", use_container_width=True):
+                    if not has_api:
+                        st.session_state[cache_key] = (
+                            "⚠️ 需設定 ANTHROPIC_API_KEY\n"
+                            "Manage app → Secrets →\n"
+                            "ANTHROPIC_API_KEY = \"sk-ant-...\""
+                        )
+                    else:
+                        with st.spinner("分析中…"):
+                            zh = nf.zh_news_analysis(news_item, impact)
+                        st.session_state[cache_key] = zh
                     st.rerun()
 
     st.caption("⚠️ 景氣循環判斷為輔助參考，不構成投資建議。")
