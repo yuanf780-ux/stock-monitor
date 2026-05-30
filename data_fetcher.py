@@ -83,6 +83,63 @@ def _get_tw_names() -> Dict[str, str]:
     return _TW_NAMES
 
 
+def get_all_stock_options() -> list:
+    """
+    回傳所有可搜尋股票的選項列表，供 selectbox 使用。
+    格式：["台積電 2330.TW", "鴻海 2317.TW", "輝達 NVDA", ...]
+    """
+    _get_tw_names()   # 確保已載入
+    options = []
+
+    # 台股（從 TWSE 資料）
+    seen = set()
+    for code, name in sorted(_TW_NAMES.items()):
+        if code.endswith(".TW") and code not in seen:
+            seen.add(code)
+            options.append(f"{name} ({code})")
+
+    # 常見美股：優先用中文名稱
+    us_added   = set()
+    sym_to_cn  = {}   # sym → best Chinese name
+    for cn_name, sym in _US_CN_MAP.items():
+        # 只取中文名稱（非純 ASCII）
+        if not cn_name.isascii() and sym not in sym_to_cn:
+            sym_to_cn[sym] = cn_name
+    for sym, cn_name in sym_to_cn.items():
+        options.append(f"{cn_name} ({sym})")
+        us_added.add(sym)
+    # 補上沒有中文名稱的美股（用純英文代碼）
+    for sym in ["NVDA","AAPL","TSLA","MSFT","GOOGL","AMZN","META","AMD",
+                "INTC","AVGO","QCOM","MU","SMCI","DELL","TSM","ASML",
+                "AMAT","LRCX","KLAC","WDC","LLY","NVO","ISRG","JPM",
+                "HPE","VRT","ANET","CSCO","GS","JPM","BAC","RIVN"]:
+        if sym not in us_added:
+            options.append(f"{sym} ({sym})")
+            us_added.add(sym)
+
+    return options
+
+
+def option_to_ticker(option: str) -> Tuple[str, str]:
+    """
+    從選項字串取出 ticker 和名稱。
+    支援格式：'台積電  2330.TW' 或 '輝達 (NVDA)' 或 '台泥  1101.TW'
+    """
+    s = option.strip()
+    # 格式：'名稱 (代碼)'
+    if "(" in s and s.endswith(")"):
+        ticker = s.split("(")[-1].rstrip(")")
+        name   = s.split("(")[0].strip()
+        return ticker, name
+    # 格式：'名稱  代碼'（雙空格）
+    parts = s.split()
+    if len(parts) >= 2:
+        ticker = parts[-1]
+        name   = " ".join(parts[:-1])
+        return ticker, name
+    return s.upper(), s
+
+
 def name_to_ticker(query: str) -> Tuple[str, str]:
     """
     把中文名稱或代碼轉換成 ticker。
