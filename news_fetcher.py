@@ -88,19 +88,27 @@ def _fetch_one(sym: str, max_n: int, seen: set) -> List[Dict]:
     return result
 
 
-def fetch_stock_news(tickers: List[str] = None, max_per_ticker: int = 3) -> List[Dict]:
-    """平行抓取多股票新聞，速度比串行快 4-5 倍"""
+def fetch_stock_news(tickers: List[str] = None, max_per_ticker: int = 8,
+                     hours: int = 24) -> List[Dict]:
+    """
+    平行抓取多股票新聞，保留過去 N 小時的全部新聞（預設 24 小時）。
+    max_per_ticker：每支股票最多抓幾則（yfinance 上限約 10-15）
+    hours：保留幾小時內的新聞
+    """
+    import time as _time
     from concurrent.futures import ThreadPoolExecutor, as_completed
     if tickers is None:
         tickers = NEWS_TICKERS
 
+    cutoff = _time.time() - hours * 3600   # 24小時前的 timestamp
+
     seen_titles: set = set()
     all_news: List[Dict] = []
 
-    with ThreadPoolExecutor(max_workers=min(len(tickers), 6)) as pool:
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
         futures = {pool.submit(_fetch_one, sym, max_per_ticker, set()): sym
                    for sym in tickers}
-        for fut in as_completed(futures, timeout=8):
+        for fut in as_completed(futures, timeout=12):
             try:
                 items = fut.result()
                 for item in items:
@@ -111,7 +119,10 @@ def fetch_stock_news(tickers: List[str] = None, max_per_ticker: int = 3) -> List
                 pass
 
     all_news.sort(key=lambda x: x["ts"], reverse=True)
-    return all_news[:40]
+
+    # 保留 24 小時內的新聞；若太少則至少保留最新 15 則
+    within_day = [n for n in all_news if n["ts"] >= cutoff]
+    return within_day if len(within_day) >= 10 else all_news[:max(15, len(within_day))]
 
 
 # ── 新聞關鍵字 → 產業影響對照表 ──────────────────────────────────────
